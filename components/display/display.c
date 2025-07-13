@@ -39,7 +39,7 @@ static void disp_flush(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *co
     lv_disp_flush_ready(drv);
 }
 
-void display_init(void)
+esp_err_t display_init(void)
 {
     lv_init();
 
@@ -50,7 +50,11 @@ void display_init(void)
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
     };
-    spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
+    esp_err_t err = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to init SPI bus: %s", esp_err_to_name(err));
+        return err;
+    }
 
     spi_device_interface_config_t devcfg = {
         .clock_speed_hz = 40 * 1000 * 1000,
@@ -58,7 +62,11 @@ void display_init(void)
         .spics_io_num = 10,
         .queue_size = 7,
     };
-    spi_bus_add_device(SPI2_HOST, &devcfg, &st7789_handle);
+    err = spi_bus_add_device(SPI2_HOST, &devcfg, &st7789_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to add SPI device: %s", esp_err_to_name(err));
+        return err;
+    }
 
     ESP_LOGI(TAG, "ST7789 initialized");
 
@@ -69,6 +77,7 @@ void display_init(void)
     disp_drv.hor_res = 240;
     disp_drv.ver_res = 320;
     lv_disp_drv_register(&disp_drv);
+    return ESP_OK;
 }
 
 void display_update(void)

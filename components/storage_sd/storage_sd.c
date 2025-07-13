@@ -11,7 +11,7 @@
 
 static sdmmc_card_t *sdcard;
 
-void storage_sd_init(void)
+esp_err_t storage_sd_init(void)
 {
     sdmmc_host_t host = SDMMC_HOST_DEFAULT();
     sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
@@ -21,8 +21,13 @@ void storage_sd_init(void)
         .max_files = 5,
     };
 
-    esp_vfs_fat_sdmmc_mount("/sdcard", &host, &slot_config, &mount_config, &sdcard);
+    esp_err_t err = esp_vfs_fat_sdmmc_mount("/sdcard", &host, &slot_config, &mount_config, &sdcard);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to mount SD card: %s", esp_err_to_name(err));
+        return err;
+    }
     ESP_LOGI(TAG, "SD card mounted");
+    return ESP_OK;
 }
 
 void *storage_sd_load(const char *path, size_t *size)

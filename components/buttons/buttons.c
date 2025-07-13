@@ -1,8 +1,9 @@
 #include "buttons.h"
 #include "esp_log.h"
 
-void buttons_init(void)
+esp_err_t buttons_init(void)
 {
     // Placeholder initialization
     ESP_LOGI("buttons", "Initializing buttons");
+    return ESP_OK;
 }

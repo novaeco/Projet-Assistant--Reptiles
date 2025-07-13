@@ -6,7 +6,7 @@
 
 static ledc_channel_config_t ledc_channel;
 
-void backlight_init(void)
+esp_err_t backlight_init(void)
 {
     ledc_timer_config_t ledc_timer = {
         .speed_mode       = LEDC_LOW_SPEED_MODE,
@@ -15,7 +15,11 @@ void backlight_init(void)
         .freq_hz          = 1000,
         .clk_cfg          = LEDC_AUTO_CLK,
     };
-    ledc_timer_config(&ledc_timer);
+    esp_err_t err = ledc_timer_config(&ledc_timer);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "ledc_timer_config failed: %s", esp_err_to_name(err));
+        return err;
+    }
 
     ledc_channel.gpio_num   = 5;
     ledc_channel.speed_mode = LEDC_LOW_SPEED_MODE;
@@ -23,9 +27,14 @@ void backlight_init(void)
     ledc_channel.timer_sel  = LEDC_TIMER_0;
     ledc_channel.duty       = 0;
     ledc_channel.hpoint     = 0;
-    ledc_channel_config(&ledc_channel);
+    err = ledc_channel_config(&ledc_channel);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "ledc_channel_config failed: %s", esp_err_to_name(err));
+        return err;
+    }
 
     ESP_LOGI(TAG, "Backlight PWM initialized");
+    return ESP_OK;
 }
 
 void backlight_set(uint8_t level)

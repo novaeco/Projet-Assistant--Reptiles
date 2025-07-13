@@ -21,13 +21,43 @@ static void hello_task(void *pvParameter)
 
 void app_main(void)
 {
-    power_init();
-    backlight_init();
-    display_init();
-    keyboard_init();
-    touch_init();
-    storage_sd_init();
-    network_init();
+    esp_err_t err;
+
+    err = power_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "power_init failed: %s", esp_err_to_name(err));
+        return;
+    }
+    err = backlight_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "backlight_init failed: %s", esp_err_to_name(err));
+        return;
+    }
+    err = display_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "display_init failed: %s", esp_err_to_name(err));
+        return;
+    }
+    err = keyboard_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "keyboard_init failed: %s", esp_err_to_name(err));
+        return;
+    }
+    err = touch_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "touch_init failed: %s", esp_err_to_name(err));
+        return;
+    }
+    err = storage_sd_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "storage_sd_init failed: %s", esp_err_to_name(err));
+        return;
+    }
+    err = network_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "network_init failed: %s", esp_err_to_name(err));
+        return;
+    }
 
     backlight_set(128);
     xTaskCreate(hello_task, "hello_task", 2048, NULL, 5, NULL);

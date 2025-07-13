@@ -65,7 +65,7 @@ uint16_t keyboard_get_state(void)
     return key_mask;
 }
 
-void keyboard_init(void)
+esp_err_t keyboard_init(void)
 {
     for (int i = 0; i < KB_ROWS; i++) {
         gpio_config_t io_conf = {
@@ -74,8 +74,16 @@ void keyboard_init(void)
             .pull_up_en = GPIO_PULLUP_DISABLE,
             .pull_down_en = GPIO_PULLDOWN_DISABLE,
         };
-        gpio_config(&io_conf);
-        gpio_set_level(row_pins[i], 1);
+        esp_err_t err = gpio_config(&io_conf);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "gpio_config row %d failed: %s", i, esp_err_to_name(err));
+            return err;
+        }
+        err = gpio_set_level(row_pins[i], 1);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "gpio_set_level row %d failed: %s", i, esp_err_to_name(err));
+            return err;
+        }
     }
 
     for (int i = 0; i < KB_COLS; i++) {
@@ -85,10 +93,18 @@ void keyboard_init(void)
             .pull_up_en = GPIO_PULLUP_ENABLE,
             .pull_down_en = GPIO_PULLDOWN_DISABLE,
         };
-        gpio_config(&io_conf);
+        esp_err_t err = gpio_config(&io_conf);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "gpio_config col %d failed: %s", i, esp_err_to_name(err));
+            return err;
+        }
     }
 
-    xTaskCreate(keyboard_task, "keyboard_task", 2048, NULL, 5, NULL);
+    if (xTaskCreate(keyboard_task, "keyboard_task", 2048, NULL, 5, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create keyboard task");
+        return ESP_FAIL;
+    }
     ESP_LOGI(TAG, "Keyboard scanner started");
+    return ESP_OK;
 }
 
