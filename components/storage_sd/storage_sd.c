@@ -1,8 +1,47 @@
 #include "storage_sd.h"
 #include "esp_log.h"
+#include "driver/sdmmc_host.h"
+#include "driver/sdmmc_defs.h"
+#include "sdmmc_cmd.h"
+#include "esp_vfs_fat.h"
+#include <stdio.h>
+#include <stdlib.h>
+
+#define TAG "storage_sd"
+
+static sdmmc_card_t *sdcard;
 
 void storage_sd_init(void)
 {
-    // Placeholder initialization
-    ESP_LOGI("storage_sd", "Initializing storage_sd");
+    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+    sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
+
+    esp_vfs_fat_sdmmc_mount_config_t mount_config = {
+        .format_if_mount_failed = false,
+        .max_files = 5,
+    };
+
+    esp_vfs_fat_sdmmc_mount("/sdcard", &host, &slot_config, &mount_config, &sdcard);
+    ESP_LOGI(TAG, "SD card mounted");
 }
+
+void *storage_sd_load(const char *path, size_t *size)
+{
+    char full[128];
+    snprintf(full, sizeof(full), "/sdcard/%s", path);
+    FILE *f = fopen(full, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    rewind(f);
+    void *buf = malloc(len);
+    if (buf && fread(buf, 1, len, f) == len) {
+        if (size) *size = len;
+    } else {
+        free(buf);
+        buf = NULL;
+    }
+    fclose(f);
+    return buf;
+}
+
