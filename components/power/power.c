@@ -12,6 +12,7 @@
 static esp_pm_lock_handle_t s_performance_lock;
 static int64_t s_last_activity_us;
 static TaskHandle_t s_monitor_task;
+static bool s_high_performance = true;
 
 #define WAKEUP_GPIO_MASK ((1ULL<<2) | (1ULL<<3) | (1ULL<<4) | (1ULL<<5) | \
                           (1ULL<<6) | (1ULL<<7) | (1ULL<<8) | (1ULL<<9))
@@ -36,12 +37,14 @@ esp_err_t power_init(void)
 void power_high_performance(void)
 {
     esp_pm_lock_acquire(s_performance_lock);
+    s_high_performance = true;
     ESP_LOGI(TAG, "High performance mode");
 }
 
 void power_low_power(void)
 {
     esp_pm_lock_release(s_performance_lock);
+    s_high_performance = false;
     ESP_LOGI(TAG, "Low power mode");
 }
 
@@ -64,6 +67,11 @@ static void inactivity_task(void *arg)
         }
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
+}
+
+uint8_t power_get_usage_percent(void)
+{
+    return s_high_performance ? 80 : 20;
 }
 
 
