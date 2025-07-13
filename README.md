@@ -30,6 +30,7 @@ Unity tests are located in the `tests/` directory. Once the ESP-IDF environment 
 ```bash
 idf.py test
 ```
+Run the command from the project root to execute all unit tests using the provided mocks.
 
 
 ## Usage
