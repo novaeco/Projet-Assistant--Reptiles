@@ -9,6 +9,7 @@
 #include "network.h"
 #include "storage_sd.h"
 #include "power.h"
+#include "ui.h"
 
 static const char *TAG = "app_main";
 
@@ -44,6 +45,11 @@ void app_main(void)
         ESP_LOGE(TAG, "display_init failed: %s", esp_err_to_name(err));
         return;
     }
+    err = ui_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "ui_init failed: %s", esp_err_to_name(err));
+        return;
+    }
     err = keyboard_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "keyboard_init failed: %s", esp_err_to_name(err));
@@ -71,9 +77,11 @@ void app_main(void)
     }
 
     backlight_set(128);
+    ui_show_home();
     xTaskCreate(hello_task, "hello_task", 2048, NULL, 5, NULL);
 
     while (1) {
+        ui_update();
         display_update();
         network_update();
         vTaskDelay(pdMS_TO_TICKS(5));

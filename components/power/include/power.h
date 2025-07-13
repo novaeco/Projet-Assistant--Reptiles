@@ -14,4 +14,7 @@ void power_low_power(void);
 /** Register a user activity event */
 void power_register_activity(void);
 
+/** Get current energy usage as a percentage */
+uint8_t power_get_usage_percent(void);
+
 
