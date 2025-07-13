@@ -63,6 +63,52 @@ After flashing, the application brings up the ST7789 LCD with LVGL and starts sc
             ------
 ```
 
+## Directory Structure
+
+The repository follows a typical ESP-IDF layout. The `main/` directory holds
+`app_main.c`, which initializes every subsystem. Reusable modules live under
+`components/` and are built as independent ESP-IDF components:
+
+| Component     | Purpose                                                |
+|---------------|--------------------------------------------------------|
+| `backlight`   | Controls LCD brightness via PWM.                       |
+| `buttons`     | Handles the physical button and triggers activity.     |
+| `display`     | Sets up the ST7789 display driver and LVGL.            |
+| `keyboard`    | Scans the 4x4 key matrix.                              |
+| `network`     | Manages Wi‑Fi 6 and BLE connectivity.                  |
+| `power`       | Implements power management and sleep handling.        |
+| `storage_sd`  | Loads LVGL assets from a microSD card.                 |
+| `touch`       | Optional capacitive touch controller support.          |
+
+Unit tests reside in `tests/` alongside mocked drivers, while project
+configuration files such as `CMakeLists.txt` and `sdkconfig.defaults` live in
+the repository root.
+
+## Power‑Saving Strategies
+
+The firmware creates an ESP‑IDF power‑management lock in `power_init()` and
+switches between high‑performance and low‑power modes using
+`power_high_performance()` and `power_low_power()`. An inactivity task monitors
+user input and after 30 seconds releases the lock, enables GPIO and touch
+wake‑ups and enters light sleep. Any key press, button interrupt or touch event
+calls `power_register_activity()` to reset the timer and restore
+high‑performance mode when the device wakes.
+
+## LVGL Interface
+
+The LVGL display presents a clean status bar with network information followed
+by a main content area. A simplified layout is shown below:
+
+```
+┌───────────────────────────────┐
+│  Wi‑Fi/BLE Status Label       │
+├───────────────────────────────┤
+│                               │
+│       Application Views       │
+│                               │
+└───────────────────────────────┘
+```
+
 ## Credits
 
 This project is maintained by the LizardNova developers and uses ESP-IDF under the Apache 2.0 license. Contributions are welcome!
