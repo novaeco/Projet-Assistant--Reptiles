@@ -26,7 +26,7 @@ This repository shows how to set up and build an application using [ESP-IDF](htt
 
 ## Usage
 
-After flashing, the example application initializes the LCD and displays a simple test pattern. If you are using the Touch variant, touch events are printed to the serial console. You can modify the source code to experiment with different graphics or integrate your own application logic.
+After flashing, the application brings up the ST7789 LCD with LVGL and starts scanning the keyboard matrix. Wi-Fi 6 and BLE are initialized and their status is shown on screen. LVGL assets can be loaded from a microSD card and the backlight brightness is controlled by PWM. Touch input is optional and power modes can be switched between high-performance and low-power cores.
 
 ## GPIO Assignments
 
