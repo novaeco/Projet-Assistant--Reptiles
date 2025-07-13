@@ -1,0 +1,7 @@
+config WIFI_SSID
+    string "WiFi SSID"
+    default "MyWiFi"
+
+config WIFI_PASSWORD
+    string "WiFi Password"
+    default "MyPassword"
