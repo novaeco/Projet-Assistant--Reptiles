@@ -1,6 +1,7 @@
 #include "backlight.h"
 #include "esp_log.h"
 #include "driver/ledc.h"
+#include "sdkconfig.h"
 
 #define TAG "backlight"
 
@@ -21,9 +22,9 @@ esp_err_t backlight_init(void)
         return err;
     }
 
-    ledc_channel.gpio_num   = 5;
+    ledc_channel.gpio_num   = CONFIG_BACKLIGHT_PIN;
     ledc_channel.speed_mode = LEDC_LOW_SPEED_MODE;
-    ledc_channel.channel    = LEDC_CHANNEL_0;
+    ledc_channel.channel    = CONFIG_BACKLIGHT_LEDC_CHANNEL;
     ledc_channel.timer_sel  = LEDC_TIMER_0;
     ledc_channel.duty       = 0;
     ledc_channel.hpoint     = 0;
