@@ -3,6 +3,7 @@
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
 #include "lvgl.h"
+#include "sdkconfig.h"
 
 #define TAG "display"
 
@@ -61,9 +62,9 @@ esp_err_t display_init(const display_config_t *config)
     lv_init();
 
     spi_bus_config_t buscfg = {
-        .mosi_io_num = 7,
+        .mosi_io_num = CONFIG_SPI_MOSI_PIN,
         .miso_io_num = -1,
-        .sclk_io_num = 6,
+        .sclk_io_num = CONFIG_SPI_SCLK_PIN,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
     };
@@ -76,7 +77,7 @@ esp_err_t display_init(const display_config_t *config)
     spi_device_interface_config_t devcfg = {
         .clock_speed_hz = 40 * 1000 * 1000,
         .mode = 0,
-        .spics_io_num = 10,
+        .spics_io_num = CONFIG_SPI_CS_PIN,
         .queue_size = 7,
     };
     err = spi_bus_add_device(SPI2_HOST, &devcfg, &st7789_handle);

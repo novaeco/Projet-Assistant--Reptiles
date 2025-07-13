@@ -6,11 +6,12 @@
 #include "nvs.h"
 #include "lvgl.h"
 #include "power.h"
+#include "sdkconfig.h"
 
 #define TAG "touch"
 
 static bool has_touch = false;
-#define TOUCH_INT_PIN 4
+#define TOUCH_INT_PIN CONFIG_TOUCH_INT_PIN
 #define TOUCH_ADDR 0x38
 
 static touch_calibration_t s_cal = {0, 0, 320, 240};
@@ -40,8 +41,8 @@ esp_err_t touch_init(void)
 
     i2c_config_t conf = {
         .mode = I2C_MODE_MASTER,
-        .sda_io_num = 3,
-        .scl_io_num = 2,
+        .sda_io_num = CONFIG_I2C_SDA_PIN,
+        .scl_io_num = CONFIG_I2C_SCL_PIN,
         .sda_pullup_en = GPIO_PULLUP_ENABLE,
         .scl_pullup_en = GPIO_PULLUP_ENABLE,
         .master.clk_speed = 400000,
