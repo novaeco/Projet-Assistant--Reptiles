@@ -24,6 +24,14 @@ This repository shows how to set up and build an application using [ESP-IDF](htt
    ```
    Replace `PORT` with the serial port of your development board.
 
+## Running Unit Tests
+
+Unity tests are located in the `tests/` directory. Once the ESP-IDF environment is set up, run:
+```bash
+idf.py test
+```
+
+
 ## Usage
 
 After flashing, the application brings up the ST7789 LCD with LVGL and starts scanning the keyboard matrix. Wi-Fi 6 and BLE are initialized and their status is shown on screen. LVGL assets can be loaded from a microSD card and the backlight brightness is controlled by PWM. Touch input is optional and power modes can be switched between high-performance and low-power cores.
