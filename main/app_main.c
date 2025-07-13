@@ -33,7 +33,11 @@ void app_main(void)
         ESP_LOGE(TAG, "backlight_init failed: %s", esp_err_to_name(err));
         return;
     }
-    err = display_init();
+    display_config_t disp_cfg = {
+        .orientation = DISPLAY_ORIENTATION_PORTRAIT,
+        .color_format = DISPLAY_COLOR_FORMAT_RGB565,
+    };
+    err = display_init(&disp_cfg);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "display_init failed: %s", esp_err_to_name(err));
         return;
