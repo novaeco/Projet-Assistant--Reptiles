@@ -1,7 +1,9 @@
 #pragma once
 
+#include "esp_err.h"
+
 /** Initialize power management */
-void power_init(void);
+esp_err_t power_init(void);
 
 /** Switch CPU to high performance mode */
 void power_high_performance(void);
