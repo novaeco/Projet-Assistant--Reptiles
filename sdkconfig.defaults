@@ -1,1 +1,3 @@
 # Default configuration options
+CONFIG_WIFI_SSID="MyWiFi"
+CONFIG_WIFI_PASSWORD="MyPassword"
