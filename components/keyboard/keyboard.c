@@ -3,6 +3,7 @@
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "power.h"
 
 #define TAG "keyboard"
 
@@ -15,6 +16,7 @@ static const gpio_num_t col_pins[KB_COLS] = {6, 7, 8, 9};
 static uint8_t debounce_cnt[KB_ROWS][KB_COLS];
 static bool key_state[KB_ROWS][KB_COLS];
 static uint16_t key_mask;
+static uint16_t prev_mask;
 
 static void keyboard_task(void *arg)
 {
@@ -55,6 +57,10 @@ static void keyboard_task(void *arg)
             }
         }
 
+        if (mask != prev_mask) {
+            power_register_activity();
+            prev_mask = mask;
+        }
         key_mask = mask;
         vTaskDelay(pdMS_TO_TICKS(10));
     }

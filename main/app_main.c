@@ -5,6 +5,7 @@
 #include "backlight.h"
 #include "keyboard.h"
 #include "touch.h"
+#include "buttons.h"
 #include "network.h"
 #include "storage_sd.h"
 #include "power.h"
@@ -28,6 +29,7 @@ void app_main(void)
         ESP_LOGE(TAG, "power_init failed: %s", esp_err_to_name(err));
         return;
     }
+    power_high_performance();
     err = backlight_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "backlight_init failed: %s", esp_err_to_name(err));
@@ -45,6 +47,11 @@ void app_main(void)
     err = keyboard_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "keyboard_init failed: %s", esp_err_to_name(err));
+        return;
+    }
+    err = buttons_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "buttons_init failed: %s", esp_err_to_name(err));
         return;
     }
     err = touch_init();

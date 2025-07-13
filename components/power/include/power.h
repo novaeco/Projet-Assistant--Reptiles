@@ -11,3 +11,7 @@ void power_high_performance(void);
 /** Switch CPU to low power mode */
 void power_low_power(void);
 
+/** Register a user activity event */
+void power_register_activity(void);
+
+
