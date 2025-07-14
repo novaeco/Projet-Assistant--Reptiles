@@ -14,11 +14,16 @@ This repository shows how to set up and build an application using [ESP-IDF](htt
    ```bash
    . $IDF_PATH/export.sh
    ```
-3. Configure the project:
+3. Select the default configuration for your board:
+   ```bash
+   export SDKCONFIG_DEFAULTS=sdkconfig.lcd   # LCD board
+   # export SDKCONFIG_DEFAULTS=sdkconfig.touch # Touch board
+   ```
+4. Configure the project:
    ```bash
    idf.py menuconfig
    ```
-4. Build and flash:
+5. Build and flash:
    ```bash
    idf.py -p PORT flash monitor
    ```
@@ -88,8 +93,7 @@ The repository follows a typical ESP-IDF layout. The `main/` directory holds
 | `touch`       | Optional capacitive touch controller support.          |
 
 Unit tests reside in `tests/` alongside mocked drivers, while project
-configuration files such as `CMakeLists.txt` and `sdkconfig.defaults` live in
-the repository root.
+configuration files such as `CMakeLists.txt` and the `sdkconfig.*` defaults live in the repository root.
 
 ## Power‑Saving Strategies
 
