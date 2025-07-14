@@ -14,6 +14,7 @@
 #define TAG "network"
 
 static char ip_addr[16];
+static char wifi_ssid[32];
 static bool wifi_connected;
 static bool wifi_dirty;
 static bool ble_connected;
@@ -129,6 +130,9 @@ esp_err_t network_init(void)
         nvs_close(nvs);
     }
 
+    strncpy(wifi_ssid, ssid, sizeof(wifi_ssid));
+    wifi_ssid[sizeof(wifi_ssid) - 1] = '\0';
+
     wifi_config_t sta_cfg = {
         .sta = {
             .ssid = "",
@@ -243,7 +247,7 @@ esp_err_t network_init(void)
 void network_update(void)
 {
     if (wifi_dirty || ble_dirty) {
-        ui_update_network(CONFIG_WIFI_SSID,
+        ui_update_network(wifi_ssid,
                           wifi_connected ? ip_addr : "N/A",
                           ble_connected);
         wifi_dirty = false;
