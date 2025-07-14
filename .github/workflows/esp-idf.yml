@@ -33,14 +33,9 @@ jobs:
       - name: Install ESP-IDF tools
         run: $IDF_PATH/install.sh esp32c6
 
-      - name: Build
-        run: |
-          . $IDF_PATH/export.sh
-          idf.py build
-        shell: bash
-
-      - name: Test
-        run: |
-          . $IDF_PATH/export.sh
-          idf.py test
-        shell: bash
+     - name: Build and Test
+  run: |
+    source $IDF_PATH/export.sh
+    idf.py build
+    idf.py test
+  shell: bash
