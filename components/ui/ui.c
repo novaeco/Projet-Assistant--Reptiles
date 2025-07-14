@@ -20,12 +20,15 @@ static ui_lang_t s_lang = UI_LANG_EN;
 
 static lv_obj_t *home_screen;
 static lv_obj_t *settings_screen;
+static lv_obj_t *network_screen;
 static lv_obj_t *energy_bar;
 static lv_obj_t *home_title;
 static lv_obj_t *settings_title;
+static lv_obj_t *network_title;
 static lv_obj_t *btn_en;
 static lv_obj_t *btn_fr;
 static lv_obj_t *error_label;
+static lv_obj_t *network_label;
 
 static const char *get_str(ui_str_id_t id)
 {
@@ -63,6 +66,13 @@ esp_err_t ui_init(void)
     settings_title = lv_label_create(settings_screen);
     lv_obj_align(settings_title, LV_ALIGN_TOP_MID, 0, 10);
 
+    network_screen = lv_obj_create(NULL);
+    network_title = lv_label_create(network_screen);
+    lv_obj_align(network_title, LV_ALIGN_TOP_MID, 0, 10);
+    lv_label_set_text(network_title, "Network");
+    network_label = lv_label_create(network_screen);
+    lv_obj_align(network_label, LV_ALIGN_CENTER, 0, 0);
+
     btn_en = lv_btn_create(settings_screen);
     lv_obj_align(btn_en, LV_ALIGN_LEFT_MID, 10, 0);
     lv_obj_t *lbl_en = lv_label_create(btn_en);
@@ -99,9 +109,24 @@ void ui_show_settings(void)
     lv_scr_load(settings_screen);
 }
 
+void ui_show_network(void)
+{
+    lv_scr_load(network_screen);
+}
+
 void ui_update(void)
 {
     lv_bar_set_value(energy_bar, power_get_usage_percent(), LV_ANIM_OFF);
+}
+
+void ui_update_network(const char *ssid, const char *ip, bool ble_connected)
+{
+    char buf[96];
+    snprintf(buf, sizeof(buf), "SSID: %s\nIP: %s\nBLE: %s",
+             ssid,
+             ip,
+             ble_connected ? "Connected" : "Advertising");
+    lv_label_set_text(network_label, buf);
 }
 
 void ui_show_error(const char *msg)

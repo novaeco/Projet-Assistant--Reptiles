@@ -80,7 +80,21 @@ void app_main(void)
     ui_show_home();
     xTaskCreate(hello_task, "hello_task", 2048, NULL, 5, NULL);
 
+    uint16_t prev_keys = 0;
+
     while (1) {
+        uint16_t keys = keyboard_get_state();
+        if (keys != prev_keys) {
+            if (keys & 1) {
+                ui_show_home();
+            } else if (keys & 2) {
+                ui_show_settings();
+            } else if (keys & 4) {
+                ui_show_network();
+            }
+            prev_keys = keys;
+        }
+
         ui_update();
         display_update();
         storage_sd_update();

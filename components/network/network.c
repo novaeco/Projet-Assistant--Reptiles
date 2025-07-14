@@ -7,13 +7,13 @@
 #include "esp_bt_main.h"
 #include "esp_gap_ble_api.h"
 #include "esp_gatts_api.h"
-#include "lvgl.h"
+#include "ui.h"
 #include "sdkconfig.h"
 
 #define TAG "network"
 
-static lv_obj_t *status_label;
-static char wifi_status[64];
+static char ip_addr[16];
+static bool wifi_connected;
 static bool wifi_dirty;
 static bool ble_connected;
 static bool ble_dirty;
@@ -32,21 +32,25 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
     if (event_base == WIFI_EVENT) {
         switch (event_id) {
         case WIFI_EVENT_STA_START:
-            snprintf(wifi_status, sizeof(wifi_status), "Connecting...");
+            wifi_connected = false;
+            ip_addr[0] = '\0';
             esp_wifi_connect();
             wifi_dirty = true;
             break;
         case WIFI_EVENT_STA_DISCONNECTED:
-            snprintf(wifi_status, sizeof(wifi_status), "Disconnected - reconnecting...");
+            wifi_connected = false;
+            ip_addr[0] = '\0';
             esp_wifi_connect();
             wifi_dirty = true;
+            ui_show_error("Wi-Fi disconnected");
             break;
         default:
             break;
         }
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
-        snprintf(wifi_status, sizeof(wifi_status), "IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        snprintf(ip_addr, sizeof(ip_addr), IPSTR, IP2STR(&event->ip_info.ip));
+        wifi_connected = true;
         wifi_dirty = true;
     }
 }
@@ -63,6 +67,7 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
         ble_connected = false;
         ble_dirty = true;
         esp_ble_gap_start_advertising(&adv_params);
+        ui_show_error("BLE disconnected");
         break;
     default:
         break;
@@ -74,16 +79,25 @@ esp_err_t network_init(void)
     esp_err_t err = nvs_flash_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "nvs_flash_init failed: %s", esp_err_to_name(err));
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        ui_show_error(msg);
         return err;
     }
     err = esp_netif_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_netif_init failed: %s", esp_err_to_name(err));
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        ui_show_error(msg);
         return err;
     }
     err = esp_event_loop_create_default();
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "esp_event_loop_create_default failed: %s", esp_err_to_name(err));
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        ui_show_error(msg);
         return err;
     }
 
@@ -91,6 +105,9 @@ esp_err_t network_init(void)
     err = esp_wifi_init(&cfg);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_wifi_init failed: %s", esp_err_to_name(err));
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        ui_show_error(msg);
         return err;
     }
 
@@ -106,11 +123,17 @@ esp_err_t network_init(void)
     err = esp_wifi_set_mode(WIFI_MODE_STA);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_wifi_set_mode failed: %s", esp_err_to_name(err));
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        ui_show_error(msg);
         return err;
     }
     err = esp_wifi_set_config(WIFI_IF_STA, &sta_cfg);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_wifi_set_config failed: %s", esp_err_to_name(err));
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        ui_show_error(msg);
         return err;
     }
 
@@ -118,22 +141,32 @@ esp_err_t network_init(void)
                                               wifi_event_handler, NULL, NULL);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "wifi handler register failed: %s", esp_err_to_name(err));
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        ui_show_error(msg);
         return err;
     }
     err = esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
                                               wifi_event_handler, NULL, NULL);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "ip handler register failed: %s", esp_err_to_name(err));
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        ui_show_error(msg);
         return err;
     }
 
     err = esp_wifi_start();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_wifi_start failed: %s", esp_err_to_name(err));
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        ui_show_error(msg);
         return err;
     }
 
-    snprintf(wifi_status, sizeof(wifi_status), "Connecting...");
+    wifi_connected = false;
+    ip_addr[0] = '\0';
     wifi_dirty = true;
     ble_connected = false;
     ble_dirty = true;
@@ -141,37 +174,49 @@ esp_err_t network_init(void)
     err = esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "bt mem release failed: %s", esp_err_to_name(err));
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        ui_show_error(msg);
         return err;
     }
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
     err = esp_bt_controller_init(&bt_cfg);
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "bt controller init failed: %s", esp_err_to_name(err));
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        ui_show_error(msg);
         return err;
     }
     err = esp_bt_controller_enable(ESP_BT_MODE_BLE);
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "bt controller enable failed: %s", esp_err_to_name(err));
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        ui_show_error(msg);
         return err;
     }
 
     err = esp_bluedroid_init();
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "bluedroid init failed: %s", esp_err_to_name(err));
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        ui_show_error(msg);
         return err;
     }
     err = esp_bluedroid_enable();
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "bluedroid enable failed: %s", esp_err_to_name(err));
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        ui_show_error(msg);
         return err;
     }
 
     esp_ble_gatts_register_callback(gatts_event_handler);
     esp_ble_gatts_app_register(0);
     esp_ble_gap_start_advertising(&adv_params);
-
-    status_label = lv_label_create(lv_scr_act());
-    lv_label_set_text(status_label, "Wi-Fi/BLE starting...");
 
     ESP_LOGI(TAG, "Wi-Fi 6 and BLE initialized");
     return ESP_OK;
@@ -180,11 +225,9 @@ esp_err_t network_init(void)
 void network_update(void)
 {
     if (wifi_dirty || ble_dirty) {
-        char buf[96];
-        snprintf(buf, sizeof(buf), "%s\nBLE: %s",
-                 wifi_status,
-                 ble_connected ? "Connected" : "Advertising");
-        lv_label_set_text(status_label, buf);
+        ui_update_network(CONFIG_WIFI_SSID,
+                          wifi_connected ? ip_addr : "N/A",
+                          ble_connected);
         wifi_dirty = false;
         ble_dirty = false;
     }
