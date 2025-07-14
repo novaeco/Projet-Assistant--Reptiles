@@ -57,6 +57,21 @@ void *data = storage_sd_load("images/picture.bin", &size);
 lv_img_set_src(img, data);
 ```
 
+### Language Selection
+
+The user interface supports multiple languages. Call `ui_set_language()` to
+switch between the built‑in tables or load your own translations at runtime with
+`ui_load_language()`. For example:
+
+```c
+static const char *es_table[] = {
+    "Inicio", "Ajustes", "Red", "Energia", "Ingl\xC3\xA9s", "Franc\xC3\xA9s",
+    "Brillo", "SSID: %s\nIP: %s\nBLE: %s", "Conectado", "Anuncio"
+};
+ui_load_language(UI_LANG_FR + 1, es_table);
+ui_set_language(UI_LANG_FR + 1);
+```
+
 ## GPIO Assignments
 
 | Signal | ESP32-C6-LCD-1.47-M | ESP32-C6-Touch-LCD-1.47-M |
