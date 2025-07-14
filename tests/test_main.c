@@ -10,6 +10,10 @@ extern void test_power_usage_percent(void);
 extern void test_power_inactivity_timeout(void);
 extern void test_network_init_wifi_init_fail(void);
 extern void test_network_init_wifi_start_fail(void);
+extern void test_menu_home(void);
+extern void test_menu_settings(void);
+extern void test_menu_network(void);
+extern void test_menu_images(void);
 
 void app_main(void)
 {
@@ -20,6 +24,10 @@ void app_main(void)
     RUN_TEST(test_keyboard_initial_state);
     RUN_TEST(test_keyboard_init_gpio_fail);
     RUN_TEST(test_keyboard_init_task_fail);
+    RUN_TEST(test_menu_home);
+    RUN_TEST(test_menu_settings);
+    RUN_TEST(test_menu_network);
+    RUN_TEST(test_menu_images);
     RUN_TEST(test_power_usage_percent);
     RUN_TEST(test_power_inactivity_timeout);
     RUN_TEST(test_network_init_wifi_init_fail);
