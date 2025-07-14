@@ -1,6 +1,7 @@
 #include "ui.h"
 #include "lvgl.h"
 #include "power.h"
+#include "backlight.h"
 
 typedef enum {
     UI_STR_HOME_TITLE,
@@ -8,12 +9,13 @@ typedef enum {
     UI_STR_ENERGY_USAGE,
     UI_STR_LANGUAGE_EN,
     UI_STR_LANGUAGE_FR,
+    UI_STR_BRIGHTNESS,
     UI_STR_COUNT
 } ui_str_id_t;
 
 static const char *s_lang_table[2][UI_STR_COUNT] = {
-    [UI_LANG_EN] = {"Home", "Settings", "Energy", "English", "French"},
-    [UI_LANG_FR] = {"Accueil", "Param\xC3\xA8tres", "Energie", "Anglais", "Fran\xC3\xA7ais"}
+    [UI_LANG_EN] = {"Home", "Settings", "Energy", "English", "French", "Brightness"},
+    [UI_LANG_FR] = {"Accueil", "Param\xC3\xA8tres", "Energie", "Anglais", "Fran\xC3\xA7ais", "Luminosit\xC3\xA9"}
 };
 
 static ui_lang_t s_lang = UI_LANG_EN;
@@ -29,6 +31,8 @@ static lv_obj_t *btn_en;
 static lv_obj_t *btn_fr;
 static lv_obj_t *error_label;
 static lv_obj_t *network_label;
+static lv_obj_t *brightness_label;
+static lv_obj_t *brightness_slider;
 
 static const char *get_str(ui_str_id_t id)
 {
@@ -39,6 +43,13 @@ static void lang_event_cb(lv_event_t *e)
 {
     ui_lang_t lang = (ui_lang_t)lv_event_get_user_data(e);
     ui_set_language(lang);
+}
+
+static void brightness_event_cb(lv_event_t *e)
+{
+    lv_obj_t *slider = lv_event_get_target(e);
+    int16_t value = lv_slider_get_value(slider);
+    backlight_set((uint8_t)value);
 }
 
 esp_err_t ui_init(void)
@@ -85,6 +96,15 @@ esp_err_t ui_init(void)
     lv_obj_center(lbl_fr);
     lv_obj_add_event_cb(btn_fr, lang_event_cb, LV_EVENT_CLICKED, (void *)UI_LANG_FR);
 
+    brightness_label = lv_label_create(settings_screen);
+    lv_obj_align(brightness_label, LV_ALIGN_TOP_MID, 0, 40);
+
+    brightness_slider = lv_slider_create(settings_screen);
+    lv_obj_align(brightness_slider, LV_ALIGN_TOP_MID, 0, 60);
+    lv_slider_set_range(brightness_slider, 0, 255);
+    lv_slider_set_value(brightness_slider, 128, LV_ANIM_OFF);
+    lv_obj_add_event_cb(brightness_slider, brightness_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
     ui_set_language(s_lang);
     lv_scr_load(home_screen);
     return ESP_OK;
@@ -97,6 +117,7 @@ void ui_set_language(ui_lang_t lang)
     lv_label_set_text(settings_title, get_str(UI_STR_SETTINGS_TITLE));
     lv_label_set_text(lv_obj_get_child(btn_en, 0), get_str(UI_STR_LANGUAGE_EN));
     lv_label_set_text(lv_obj_get_child(btn_fr, 0), get_str(UI_STR_LANGUAGE_FR));
+    lv_label_set_text(brightness_label, get_str(UI_STR_BRIGHTNESS));
 }
 
 void ui_show_home(void)
