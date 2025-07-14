@@ -91,6 +91,8 @@ void app_main(void)
                 ui_show_settings();
             } else if (keys & 4) {
                 ui_show_network();
+            } else if (keys & 8) {
+                ui_show_images();
             }
             prev_keys = keys;
         }
