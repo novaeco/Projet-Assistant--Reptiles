@@ -102,6 +102,7 @@ ui_set_language(UI_LANG_FR + 1);
             ------
 ```
 
+
 ## Directory Structure
 
 The repository follows a typical ESP-IDF layout. The `main/` directory holds
@@ -146,6 +147,7 @@ by a main content area. A simplified layout is shown below:
 │                               │
 └───────────────────────────────┘
 ```
+
 
 ## Credits
 
