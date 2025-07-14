@@ -83,6 +83,7 @@ void app_main(void)
     while (1) {
         ui_update();
         display_update();
+        storage_sd_update();
         network_update();
         vTaskDelay(pdMS_TO_TICKS(5));
     }

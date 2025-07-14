@@ -37,6 +37,13 @@ Run the command from the project root to execute all unit tests using the provid
 
 After flashing, the application brings up the ST7789 LCD with LVGL and starts scanning the keyboard matrix. Wi-Fi 6 and BLE are initialized and their connection state is shown on the status label. The label now updates when a BLE device connects or disconnects. LVGL assets can be loaded from a microSD card and the backlight brightness is controlled by PWM. Touch input is optional and power modes can be switched between high-performance and low-power cores.
 
+### SD Card Usage
+
+Use `storage_sd_init()` to mount the card before loading assets. Call
+`storage_sd_unmount()` prior to removal and invoke `storage_sd_update()` in the
+main loop to detect if the card is unexpectedly removed. When removal is
+detected, an error is logged and displayed on the LVGL interface.
+
 ## GPIO Assignments
 
 | Signal | ESP32-C6-LCD-1.47-M | ESP32-C6-Touch-LCD-1.47-M |
