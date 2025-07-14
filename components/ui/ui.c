@@ -92,6 +92,7 @@ static lv_obj_t *wifi_save_btn;
 static lv_obj_t *wifi_ssid_label;
 static lv_obj_t *wifi_pass_label;
 static ui_page_t s_active_page = UI_PAGE_HOME;
+static uint8_t s_brightness = 128;
 
 void ui_load_language(ui_lang_t lang, const char *const table[])
 {
@@ -119,6 +120,8 @@ static void brightness_event_cb(lv_event_t *e)
     lv_obj_t *slider = lv_event_get_target(e);
     int16_t value = lv_slider_get_value(slider);
     backlight_set((uint8_t)value);
+    s_brightness = (uint8_t)value;
+    save_brightness(s_brightness);
 }
 
 static void wifi_save_event_cb(lv_event_t *e)
@@ -143,6 +146,41 @@ static void load_wifi_credentials(void)
     }
     lv_textarea_set_text(wifi_ssid_ta, ssid);
     lv_textarea_set_text(wifi_pass_ta, pass);
+}
+
+static void load_ui_settings(void)
+{
+    nvs_handle_t nvs;
+    if (nvs_open("ui", NVS_READONLY, &nvs) == ESP_OK) {
+        uint8_t val;
+        if (nvs_get_u8(nvs, "brightness", &val) == ESP_OK) {
+            s_brightness = val;
+        }
+        if (nvs_get_u8(nvs, "lang", &val) == ESP_OK && val < UI_LANG_COUNT) {
+            s_lang = (ui_lang_t)val;
+        }
+        nvs_close(nvs);
+    }
+}
+
+static void save_brightness(uint8_t level)
+{
+    nvs_handle_t nvs;
+    if (nvs_open("ui", NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_set_u8(nvs, "brightness", level);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+}
+
+static void save_language(ui_lang_t lang)
+{
+    nvs_handle_t nvs;
+    if (nvs_open("ui", NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_set_u8(nvs, "lang", (uint8_t)lang);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
 }
 
 static void image_event_cb(lv_event_t *e)
@@ -241,6 +279,7 @@ esp_err_t ui_init(void)
     lv_obj_center(save_lbl);
     lv_obj_add_event_cb(wifi_save_btn, wifi_save_event_cb, LV_EVENT_CLICKED, NULL);
     load_wifi_credentials();
+    load_ui_settings();
 
     btn_en = lv_btn_create(settings_screen);
     lv_obj_align(btn_en, LV_ALIGN_LEFT_MID, 10, 0);
@@ -260,7 +299,8 @@ esp_err_t ui_init(void)
     brightness_slider = lv_slider_create(settings_screen);
     lv_obj_align(brightness_slider, LV_ALIGN_TOP_MID, 0, 60);
     lv_slider_set_range(brightness_slider, 0, 255);
-    lv_slider_set_value(brightness_slider, 128, LV_ANIM_OFF);
+    lv_slider_set_value(brightness_slider, s_brightness, LV_ANIM_OFF);
+    backlight_set(s_brightness);
     lv_obj_add_event_cb(brightness_slider, brightness_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
     ui_set_language(s_lang);
@@ -272,6 +312,7 @@ esp_err_t ui_init(void)
 void ui_set_language(ui_lang_t lang)
 {
     s_lang = lang;
+    save_language(lang);
     lv_label_set_text(home_title, get_str(UI_STR_HOME_TITLE));
     lv_label_set_text(settings_title, get_str(UI_STR_SETTINGS_TITLE));
     lv_label_set_text(network_title, get_str(UI_STR_NETWORK_TITLE));

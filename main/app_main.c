@@ -76,7 +76,6 @@ void app_main(void)
         return;
     }
 
-    backlight_set(128);
     ui_show_home();
     xTaskCreate(hello_task, "hello_task", 2048, NULL, 5, NULL);
 
