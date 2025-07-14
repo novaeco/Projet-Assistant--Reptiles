@@ -24,6 +24,7 @@ typedef enum {
     UI_STR_WIFI_SSID,
     UI_STR_WIFI_PASS,
     UI_STR_WIFI_SAVE,
+    UI_STR_CALIBRATE,
     UI_STR_COUNT
 } ui_str_id_t;
 
@@ -43,7 +44,8 @@ static const char *s_lang_table[UI_LANG_COUNT][UI_STR_COUNT] = {
         "Wi-Fi Setup",
         "SSID",
         "Password",
-        "Save"
+        "Save",
+        "Calibrate"
     },
     [UI_LANG_FR] = {
         "Accueil",
@@ -60,7 +62,8 @@ static const char *s_lang_table[UI_LANG_COUNT][UI_STR_COUNT] = {
         "Wi-Fi",
         "SSID",
         "Mot de passe",
-        "Sauvegarder"
+        "Sauvegarder",
+        "Calibrer"
     }
 };
 
@@ -91,6 +94,13 @@ static lv_obj_t *wifi_pass_ta;
 static lv_obj_t *wifi_save_btn;
 static lv_obj_t *wifi_ssid_label;
 static lv_obj_t *wifi_pass_label;
+static lv_obj_t *calibrate_btn;
+static lv_obj_t *calib_screen;
+static lv_obj_t *calib_label;
+static lv_obj_t *calib_target;
+static uint16_t calib_x0;
+static uint16_t calib_y0;
+static uint8_t calib_step;
 static ui_page_t s_active_page = UI_PAGE_HOME;
 static uint8_t s_brightness = 128;
 
@@ -146,6 +156,37 @@ static void load_wifi_credentials(void)
     }
     lv_textarea_set_text(wifi_ssid_ta, ssid);
     lv_textarea_set_text(wifi_pass_ta, pass);
+}
+
+static void calibrate_btn_event_cb(lv_event_t *e)
+{
+    (void)e;
+    calib_step = 0;
+    lv_label_set_text(calib_label, "Touch top left");
+    lv_obj_align(calib_target, LV_ALIGN_TOP_LEFT, 20, 20);
+    lv_scr_load(calib_screen);
+    ui_set_active_page(UI_PAGE_SETTINGS);
+}
+
+static void calib_touch_event_cb(lv_event_t *e)
+{
+    (void)e;
+    uint16_t x, y;
+    if (!touch_read_raw(&x, &y)) {
+        return;
+    }
+    if (calib_step == 0) {
+        calib_x0 = x;
+        calib_y0 = y;
+        calib_step = 1;
+        lv_label_set_text(calib_label, "Touch bottom right");
+        lv_obj_align(calib_target, LV_ALIGN_BOTTOM_RIGHT, -20, -20);
+    } else {
+        touch_calibration_t cal = {calib_x0, calib_y0, x, y};
+        touch_set_calibration(&cal);
+        touch_calibration_save(&cal);
+        lv_scr_load(settings_screen);
+    }
 }
 
 static void load_ui_settings(void)
@@ -278,6 +319,15 @@ esp_err_t ui_init(void)
     lv_label_set_text(save_lbl, get_str(UI_STR_WIFI_SAVE));
     lv_obj_center(save_lbl);
     lv_obj_add_event_cb(wifi_save_btn, wifi_save_event_cb, LV_EVENT_CLICKED, NULL);
+
+    calib_screen = lv_obj_create(NULL);
+    calib_label = lv_label_create(calib_screen);
+    lv_obj_align(calib_label, LV_ALIGN_TOP_MID, 0, 10);
+    calib_target = lv_obj_create(calib_screen);
+    lv_obj_set_size(calib_target, 20, 20);
+    lv_obj_align(calib_target, LV_ALIGN_TOP_LEFT, 20, 20);
+    lv_obj_add_event_cb(calib_screen, calib_touch_event_cb, LV_EVENT_CLICKED, NULL);
+
     load_wifi_credentials();
     load_ui_settings();
 
@@ -303,6 +353,12 @@ esp_err_t ui_init(void)
     backlight_set(s_brightness);
     lv_obj_add_event_cb(brightness_slider, brightness_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
+    calibrate_btn = lv_btn_create(settings_screen);
+    lv_obj_align(calibrate_btn, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_t *cal_lbl = lv_label_create(calibrate_btn);
+    lv_obj_center(cal_lbl);
+    lv_obj_add_event_cb(calibrate_btn, calibrate_btn_event_cb, LV_EVENT_CLICKED, NULL);
+
     ui_set_language(s_lang);
     ui_set_active_page(UI_PAGE_HOME);
     lv_scr_load(home_screen);
@@ -325,6 +381,7 @@ void ui_set_language(ui_lang_t lang)
     lv_label_set_text(wifi_ssid_label, get_str(UI_STR_WIFI_SSID));
     lv_label_set_text(wifi_pass_label, get_str(UI_STR_WIFI_PASS));
     lv_label_set_text(lv_obj_get_child(wifi_save_btn, 0), get_str(UI_STR_WIFI_SAVE));
+    lv_label_set_text(lv_obj_get_child(calibrate_btn, 0), get_str(UI_STR_CALIBRATE));
 }
 
 void ui_show_home(void)
