@@ -9,16 +9,42 @@
 typedef enum {
     UI_STR_HOME_TITLE,
     UI_STR_SETTINGS_TITLE,
+    UI_STR_NETWORK_TITLE,
     UI_STR_ENERGY_USAGE,
     UI_STR_LANGUAGE_EN,
     UI_STR_LANGUAGE_FR,
     UI_STR_BRIGHTNESS,
+    UI_STR_NETWORK_FORMAT,
+    UI_STR_BLE_CONNECTED,
+    UI_STR_BLE_ADVERTISING,
     UI_STR_COUNT
 } ui_str_id_t;
 
-static const char *s_lang_table[2][UI_STR_COUNT] = {
-    [UI_LANG_EN] = {"Home", "Settings", "Energy", "English", "French", "Brightness"},
-    [UI_LANG_FR] = {"Accueil", "Param\xC3\xA8tres", "Energie", "Anglais", "Fran\xC3\xA7ais", "Luminosit\xC3\xA9"}
+static const char *s_lang_table[UI_LANG_COUNT][UI_STR_COUNT] = {
+    [UI_LANG_EN] = {
+        "Home",
+        "Settings",
+        "Network",
+        "Energy",
+        "English",
+        "French",
+        "Brightness",
+        "SSID: %s\nIP: %s\nBLE: %s",
+        "Connected",
+        "Advertising"
+    },
+    [UI_LANG_FR] = {
+        "Accueil",
+        "Param\xC3\xA8tres",
+        "R\xC3\xA9seau",
+        "Energie",
+        "Anglais",
+        "Fran\xC3\xA7ais",
+        "Luminosit\xC3\xA9",
+        "SSID : %s\nIP : %s\nBLE : %s",
+        "Connect\xC3\xA9",
+        "Annonce"
+    }
 };
 
 static ui_lang_t s_lang = UI_LANG_EN;
@@ -39,6 +65,16 @@ static lv_obj_t *brightness_slider;
 static lv_obj_t *images_screen;
 static lv_obj_t *images_list;
 static lv_obj_t *images_img;
+
+void ui_load_language(ui_lang_t lang, const char *const table[])
+{
+    if (lang >= UI_LANG_COUNT || table == NULL) {
+        return;
+    }
+    for (int i = 0; i < UI_STR_COUNT; ++i) {
+        s_lang_table[lang][i] = table[i];
+    }
+}
 
 static const char *get_str(ui_str_id_t id)
 {
@@ -114,7 +150,7 @@ esp_err_t ui_init(void)
     network_screen = lv_obj_create(NULL);
     network_title = lv_label_create(network_screen);
     lv_obj_align(network_title, LV_ALIGN_TOP_MID, 0, 10);
-    lv_label_set_text(network_title, "Network");
+    lv_label_set_text(network_title, get_str(UI_STR_NETWORK_TITLE));
     network_label = lv_label_create(network_screen);
     lv_obj_align(network_label, LV_ALIGN_CENTER, 0, 0);
 
@@ -156,6 +192,7 @@ void ui_set_language(ui_lang_t lang)
     s_lang = lang;
     lv_label_set_text(home_title, get_str(UI_STR_HOME_TITLE));
     lv_label_set_text(settings_title, get_str(UI_STR_SETTINGS_TITLE));
+    lv_label_set_text(network_title, get_str(UI_STR_NETWORK_TITLE));
     lv_label_set_text(lv_obj_get_child(btn_en, 0), get_str(UI_STR_LANGUAGE_EN));
     lv_label_set_text(lv_obj_get_child(btn_fr, 0), get_str(UI_STR_LANGUAGE_FR));
     lv_label_set_text(brightness_label, get_str(UI_STR_BRIGHTNESS));
@@ -190,10 +227,11 @@ void ui_update(void)
 void ui_update_network(const char *ssid, const char *ip, bool ble_connected)
 {
     char buf[96];
-    snprintf(buf, sizeof(buf), "SSID: %s\nIP: %s\nBLE: %s",
+    snprintf(buf, sizeof(buf), get_str(UI_STR_NETWORK_FORMAT),
              ssid,
              ip,
-             ble_connected ? "Connected" : "Advertising");
+             ble_connected ? get_str(UI_STR_BLE_CONNECTED)
+                           : get_str(UI_STR_BLE_ADVERTISING));
     lv_label_set_text(network_label, buf);
 }
 

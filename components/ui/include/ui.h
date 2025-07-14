@@ -5,7 +5,11 @@
 typedef enum {
     UI_LANG_EN,
     UI_LANG_FR,
+    UI_LANG_COUNT,
 } ui_lang_t;
+
+/** Load or replace a language table */
+void ui_load_language(ui_lang_t lang, const char *const table[]);
 
 /** Initialize screens and theme */
 esp_err_t ui_init(void);
