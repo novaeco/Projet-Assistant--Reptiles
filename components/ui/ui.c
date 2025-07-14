@@ -10,6 +10,7 @@ typedef enum {
     UI_STR_HOME_TITLE,
     UI_STR_SETTINGS_TITLE,
     UI_STR_NETWORK_TITLE,
+    UI_STR_IMAGES_TITLE,
     UI_STR_ENERGY_USAGE,
     UI_STR_LANGUAGE_EN,
     UI_STR_LANGUAGE_FR,
@@ -25,6 +26,7 @@ static const char *s_lang_table[UI_LANG_COUNT][UI_STR_COUNT] = {
         "Home",
         "Settings",
         "Network",
+        "Images",
         "Energy",
         "English",
         "French",
@@ -37,6 +39,7 @@ static const char *s_lang_table[UI_LANG_COUNT][UI_STR_COUNT] = {
         "Accueil",
         "Param\xC3\xA8tres",
         "R\xC3\xA9seau",
+        "Images",
         "Energie",
         "Anglais",
         "Fran\xC3\xA7ais",
@@ -65,6 +68,8 @@ static lv_obj_t *brightness_slider;
 static lv_obj_t *images_screen;
 static lv_obj_t *images_list;
 static lv_obj_t *images_img;
+static lv_obj_t *images_title;
+static ui_page_t s_active_page = UI_PAGE_HOME;
 
 void ui_load_language(ui_lang_t lang, const char *const table[])
 {
@@ -155,6 +160,8 @@ esp_err_t ui_init(void)
     lv_obj_align(network_label, LV_ALIGN_CENTER, 0, 0);
 
     images_screen = lv_obj_create(NULL);
+    images_title = lv_label_create(images_screen);
+    lv_obj_align(images_title, LV_ALIGN_TOP_MID, 0, 10);
     images_list = lv_list_create(images_screen);
     lv_obj_set_size(images_list, 100, 200);
     lv_obj_align(images_list, LV_ALIGN_LEFT_MID, 0, 0);
@@ -183,6 +190,7 @@ esp_err_t ui_init(void)
     lv_obj_add_event_cb(brightness_slider, brightness_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
     ui_set_language(s_lang);
+    ui_set_active_page(UI_PAGE_HOME);
     lv_scr_load(home_screen);
     return ESP_OK;
 }
@@ -193,6 +201,7 @@ void ui_set_language(ui_lang_t lang)
     lv_label_set_text(home_title, get_str(UI_STR_HOME_TITLE));
     lv_label_set_text(settings_title, get_str(UI_STR_SETTINGS_TITLE));
     lv_label_set_text(network_title, get_str(UI_STR_NETWORK_TITLE));
+    lv_label_set_text(images_title, get_str(UI_STR_IMAGES_TITLE));
     lv_label_set_text(lv_obj_get_child(btn_en, 0), get_str(UI_STR_LANGUAGE_EN));
     lv_label_set_text(lv_obj_get_child(btn_fr, 0), get_str(UI_STR_LANGUAGE_FR));
     lv_label_set_text(brightness_label, get_str(UI_STR_BRIGHTNESS));
@@ -201,22 +210,26 @@ void ui_set_language(ui_lang_t lang)
 void ui_show_home(void)
 {
     lv_scr_load(home_screen);
+    ui_set_active_page(UI_PAGE_HOME);
 }
 
 void ui_show_settings(void)
 {
     lv_scr_load(settings_screen);
+    ui_set_active_page(UI_PAGE_SETTINGS);
 }
 
 void ui_show_network(void)
 {
     lv_scr_load(network_screen);
+    ui_set_active_page(UI_PAGE_NETWORK);
 }
 
 void ui_show_images(void)
 {
     populate_images();
     lv_scr_load(images_screen);
+    ui_set_active_page(UI_PAGE_IMAGES);
 }
 
 void ui_update(void)
@@ -238,5 +251,16 @@ void ui_update_network(const char *ssid, const char *ip, bool ble_connected)
 void ui_show_error(const char *msg)
 {
     lv_label_set_text(error_label, msg);
+}
+
+void ui_set_active_page(ui_page_t page)
+{
+    s_active_page = page;
+    lv_color_t active = lv_palette_main(LV_PALETTE_BLUE);
+    lv_color_t inactive = lv_palette_main(LV_PALETTE_GREY);
+    lv_obj_set_style_text_color(home_title, page == UI_PAGE_HOME ? active : inactive, 0);
+    lv_obj_set_style_text_color(settings_title, page == UI_PAGE_SETTINGS ? active : inactive, 0);
+    lv_obj_set_style_text_color(network_title, page == UI_PAGE_NETWORK ? active : inactive, 0);
+    lv_obj_set_style_text_color(images_title, page == UI_PAGE_IMAGES ? active : inactive, 0);
 }
 

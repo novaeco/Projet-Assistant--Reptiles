@@ -8,6 +8,14 @@ typedef enum {
     UI_LANG_COUNT,
 } ui_lang_t;
 
+typedef enum {
+    UI_PAGE_HOME,
+    UI_PAGE_SETTINGS,
+    UI_PAGE_NETWORK,
+    UI_PAGE_IMAGES,
+    UI_PAGE_COUNT
+} ui_page_t;
+
 /** Load or replace a language table */
 void ui_load_language(ui_lang_t lang, const char *const table[]);
 
@@ -37,4 +45,7 @@ void ui_show_error(const char *msg);
 
 /** Show SD card image browser */
 void ui_show_images(void);
+
+/** Highlight the active navigation item */
+void ui_set_active_page(ui_page_t page);
 
