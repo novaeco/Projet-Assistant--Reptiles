@@ -7,6 +7,7 @@
 #include "esp_bt_main.h"
 #include "esp_gap_ble_api.h"
 #include "esp_gatts_api.h"
+#include "nvs.h"
 #include "ui.h"
 #include "sdkconfig.h"
 
@@ -113,12 +114,29 @@ esp_err_t network_init(void)
 
     esp_netif_create_default_wifi_sta();
 
+    char ssid[32] = CONFIG_WIFI_SSID;
+    char pass[64] = CONFIG_WIFI_PASSWORD;
+    nvs_handle_t nvs;
+    if (nvs_open("wifi", NVS_READONLY, &nvs) == ESP_OK) {
+        size_t len = sizeof(ssid);
+        if (nvs_get_str(nvs, "ssid", ssid, &len) != ESP_OK) {
+            strcpy(ssid, CONFIG_WIFI_SSID);
+        }
+        len = sizeof(pass);
+        if (nvs_get_str(nvs, "pass", pass, &len) != ESP_OK) {
+            strcpy(pass, CONFIG_WIFI_PASSWORD);
+        }
+        nvs_close(nvs);
+    }
+
     wifi_config_t sta_cfg = {
         .sta = {
-            .ssid = CONFIG_WIFI_SSID,
-            .password = CONFIG_WIFI_PASSWORD,
+            .ssid = "",
+            .password = "",
         }
     };
+    strncpy((char *)sta_cfg.sta.ssid, ssid, sizeof(sta_cfg.sta.ssid));
+    strncpy((char *)sta_cfg.sta.password, pass, sizeof(sta_cfg.sta.password));
 
     err = esp_wifi_set_mode(WIFI_MODE_STA);
     if (err != ESP_OK) {
@@ -231,5 +249,23 @@ void network_update(void)
         wifi_dirty = false;
         ble_dirty = false;
     }
+}
+
+esp_err_t network_save_credentials(const char *ssid, const char *pass)
+{
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open("wifi", NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = nvs_set_str(nvs, "ssid", ssid);
+    if (err == ESP_OK) {
+        err = nvs_set_str(nvs, "pass", pass);
+    }
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+    }
+    nvs_close(nvs);
+    return err;
 }
 

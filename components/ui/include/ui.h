@@ -34,6 +34,9 @@ void ui_show_settings(void);
 /** Show network status screen */
 void ui_show_network(void);
 
+/** Show Wi-Fi setup screen */
+void ui_show_wifi_setup(void);
+
 /** Update the network status information */
 void ui_update_network(const char *ssid, const char *ip, bool ble_connected);
 

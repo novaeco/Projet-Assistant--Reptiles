@@ -3,6 +3,8 @@
 #include "power.h"
 #include "backlight.h"
 #include "storage_sd.h"
+#include "network.h"
+#include "nvs.h"
 #include <dirent.h>
 #include <stdio.h>
 
@@ -18,6 +20,10 @@ typedef enum {
     UI_STR_NETWORK_FORMAT,
     UI_STR_BLE_CONNECTED,
     UI_STR_BLE_ADVERTISING,
+    UI_STR_WIFI_TITLE,
+    UI_STR_WIFI_SSID,
+    UI_STR_WIFI_PASS,
+    UI_STR_WIFI_SAVE,
     UI_STR_COUNT
 } ui_str_id_t;
 
@@ -34,6 +40,10 @@ static const char *s_lang_table[UI_LANG_COUNT][UI_STR_COUNT] = {
         "SSID: %s\nIP: %s\nBLE: %s",
         "Connected",
         "Advertising"
+        "Wi-Fi Setup",
+        "SSID",
+        "Password",
+        "Save"
     },
     [UI_LANG_FR] = {
         "Accueil",
@@ -46,7 +56,11 @@ static const char *s_lang_table[UI_LANG_COUNT][UI_STR_COUNT] = {
         "Luminosit\xC3\xA9",
         "SSID : %s\nIP : %s\nBLE : %s",
         "Connect\xC3\xA9",
-        "Annonce"
+        "Annonce",
+        "Wi-Fi",
+        "SSID",
+        "Mot de passe",
+        "Sauvegarder"
     }
 };
 
@@ -70,6 +84,13 @@ static lv_obj_t *images_screen;
 static lv_obj_t *images_list;
 static lv_obj_t *images_img;
 static lv_obj_t *images_title;
+static lv_obj_t *wifi_screen;
+static lv_obj_t *wifi_title;
+static lv_obj_t *wifi_ssid_ta;
+static lv_obj_t *wifi_pass_ta;
+static lv_obj_t *wifi_save_btn;
+static lv_obj_t *wifi_ssid_label;
+static lv_obj_t *wifi_pass_label;
 static ui_page_t s_active_page = UI_PAGE_HOME;
 
 void ui_load_language(ui_lang_t lang, const char *const table[])
@@ -98,6 +119,30 @@ static void brightness_event_cb(lv_event_t *e)
     lv_obj_t *slider = lv_event_get_target(e);
     int16_t value = lv_slider_get_value(slider);
     backlight_set((uint8_t)value);
+}
+
+static void wifi_save_event_cb(lv_event_t *e)
+{
+    (void)e;
+    const char *ssid = lv_textarea_get_text(wifi_ssid_ta);
+    const char *pass = lv_textarea_get_text(wifi_pass_ta);
+    network_save_credentials(ssid, pass);
+}
+
+static void load_wifi_credentials(void)
+{
+    nvs_handle_t nvs;
+    char ssid[32] = "";
+    char pass[64] = "";
+    if (nvs_open("wifi", NVS_READONLY, &nvs) == ESP_OK) {
+        size_t len = sizeof(ssid);
+        if (nvs_get_str(nvs, "ssid", ssid, &len) != ESP_OK) ssid[0] = '\0';
+        len = sizeof(pass);
+        if (nvs_get_str(nvs, "pass", pass, &len) != ESP_OK) pass[0] = '\0';
+        nvs_close(nvs);
+    }
+    lv_textarea_set_text(wifi_ssid_ta, ssid);
+    lv_textarea_set_text(wifi_pass_ta, pass);
 }
 
 static void image_event_cb(lv_event_t *e)
@@ -172,6 +217,31 @@ esp_err_t ui_init(void)
     images_img = lv_img_create(images_screen);
     lv_obj_align(images_img, LV_ALIGN_RIGHT_MID, -10, 0);
 
+    wifi_screen = lv_obj_create(NULL);
+    wifi_title = lv_label_create(wifi_screen);
+    lv_obj_align(wifi_title, LV_ALIGN_TOP_MID, 0, 10);
+    lv_label_set_text(wifi_title, get_str(UI_STR_WIFI_TITLE));
+    wifi_ssid_label = lv_label_create(wifi_screen);
+    lv_label_set_text(wifi_ssid_label, get_str(UI_STR_WIFI_SSID));
+    lv_obj_align(wifi_ssid_label, LV_ALIGN_TOP_LEFT, 10, 40);
+    wifi_ssid_ta = lv_textarea_create(wifi_screen);
+    lv_obj_set_width(wifi_ssid_ta, 160);
+    lv_obj_align(wifi_ssid_ta, LV_ALIGN_TOP_RIGHT, -10, 30);
+    wifi_pass_label = lv_label_create(wifi_screen);
+    lv_label_set_text(wifi_pass_label, get_str(UI_STR_WIFI_PASS));
+    lv_obj_align(wifi_pass_label, LV_ALIGN_TOP_LEFT, 10, 80);
+    wifi_pass_ta = lv_textarea_create(wifi_screen);
+    lv_obj_set_width(wifi_pass_ta, 160);
+    lv_textarea_set_password_mode(wifi_pass_ta, true);
+    lv_obj_align(wifi_pass_ta, LV_ALIGN_TOP_RIGHT, -10, 70);
+    wifi_save_btn = lv_btn_create(wifi_screen);
+    lv_obj_align(wifi_save_btn, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_t *save_lbl = lv_label_create(wifi_save_btn);
+    lv_label_set_text(save_lbl, get_str(UI_STR_WIFI_SAVE));
+    lv_obj_center(save_lbl);
+    lv_obj_add_event_cb(wifi_save_btn, wifi_save_event_cb, LV_EVENT_CLICKED, NULL);
+    load_wifi_credentials();
+
     btn_en = lv_btn_create(settings_screen);
     lv_obj_align(btn_en, LV_ALIGN_LEFT_MID, 10, 0);
     lv_obj_t *lbl_en = lv_label_create(btn_en);
@@ -210,6 +280,10 @@ void ui_set_language(ui_lang_t lang)
     lv_label_set_text(lv_obj_get_child(btn_en, 0), get_str(UI_STR_LANGUAGE_EN));
     lv_label_set_text(lv_obj_get_child(btn_fr, 0), get_str(UI_STR_LANGUAGE_FR));
     lv_label_set_text(brightness_label, get_str(UI_STR_BRIGHTNESS));
+    lv_label_set_text(wifi_title, get_str(UI_STR_WIFI_TITLE));
+    lv_label_set_text(wifi_ssid_label, get_str(UI_STR_WIFI_SSID));
+    lv_label_set_text(wifi_pass_label, get_str(UI_STR_WIFI_PASS));
+    lv_label_set_text(lv_obj_get_child(wifi_save_btn, 0), get_str(UI_STR_WIFI_SAVE));
 }
 
 void ui_show_home(void)
@@ -227,6 +301,13 @@ void ui_show_settings(void)
 void ui_show_network(void)
 {
     lv_scr_load(network_screen);
+    ui_set_active_page(UI_PAGE_NETWORK);
+}
+
+void ui_show_wifi_setup(void)
+{
+    load_wifi_credentials();
+    lv_scr_load(wifi_screen);
     ui_set_active_page(UI_PAGE_NETWORK);
 }
 
