@@ -97,7 +97,7 @@ esp_err_t touch_init(void)
     return ESP_OK;
 }
 
-bool touch_read(uint16_t *x, uint16_t *y)
+bool touch_read_raw(uint16_t *x, uint16_t *y)
 {
     if (!has_touch) return false;
     uint8_t reg = 0x02;
@@ -112,8 +112,17 @@ bool touch_read(uint16_t *x, uint16_t *y)
     if ((data[0] & 0x0F) == 0) {
         return false;
     }
-    uint16_t raw_x = ((data[1] & 0x0F) << 8) | data[2];
-    uint16_t raw_y = ((data[3] & 0x0F) << 8) | data[4];
+    *x = ((data[1] & 0x0F) << 8) | data[2];
+    *y = ((data[3] & 0x0F) << 8) | data[4];
+    return true;
+}
+
+bool touch_read(uint16_t *x, uint16_t *y)
+{
+    uint16_t raw_x, raw_y;
+    if (!touch_read_raw(&raw_x, &raw_y)) {
+        return false;
+    }
 
     int32_t cal_x = (int32_t)(raw_x - s_cal.x0) * 320 / (s_cal.x1 - s_cal.x0);
     int32_t cal_y = (int32_t)(raw_y - s_cal.y0) * 240 / (s_cal.y1 - s_cal.y0);
@@ -156,5 +165,11 @@ esp_err_t touch_calibration_save(const touch_calibration_t *cal)
     }
     nvs_close(nvs);
     return err;
+}
+
+void touch_set_calibration(const touch_calibration_t *cal)
+{
+    if (!cal) return;
+    s_cal = *cal;
 }
 
