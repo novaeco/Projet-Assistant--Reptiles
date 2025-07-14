@@ -1,0 +1,16 @@
+# Ignore build outputs and configuration for ESP-IDF
+build/
+*.bin
+*.elf
+*.map
+sdkconfig
+sdkconfig.old
+sdkconfig.*.bak
+
+# Python cache
+__pycache__/
+*.pyc
+
+# IDE directories
+.vscode/
+.idea/
