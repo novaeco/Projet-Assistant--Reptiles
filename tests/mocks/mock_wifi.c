@@ -54,3 +54,30 @@ esp_err_t esp_ble_gatts_register_callback(esp_gatts_cb_t callback) { (void)callb
 esp_err_t esp_ble_gatts_app_register(uint16_t app_id) { (void)app_id; return ESP_OK; }
 esp_err_t esp_ble_gap_start_advertising(const esp_ble_adv_params_t *params) { (void)params; return ESP_OK; }
 
+esp_err_t nvs_open(const char *name, nvs_open_mode_t open_mode, nvs_handle_t *out_handle)
+{
+    (void)name; (void)open_mode; if (out_handle) *out_handle = 1; return ESP_OK;
+}
+
+esp_err_t nvs_get_str(nvs_handle_t handle, const char *key, char *out_value, size_t *length)
+{
+    (void)handle; (void)key;
+    if (out_value && length && *length > 0) { out_value[0] = '\0'; *length = 1; }
+    return ESP_FAIL;
+}
+
+esp_err_t nvs_set_str(nvs_handle_t handle, const char *key, const char *value)
+{
+    (void)handle; (void)key; (void)value; return ESP_OK;
+}
+
+esp_err_t nvs_commit(nvs_handle_t handle)
+{
+    (void)handle; return ESP_OK;
+}
+
+void nvs_close(nvs_handle_t handle)
+{
+    (void)handle;
+}
+
