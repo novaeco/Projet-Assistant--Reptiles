@@ -25,6 +25,10 @@ typedef enum {
     UI_STR_WIFI_PASS,
     UI_STR_WIFI_SAVE,
     UI_STR_CALIBRATE,
+    UI_STR_WIFI_DISCONNECTED,
+    UI_STR_BLE_DISCONNECTED,
+    UI_STR_SD_REMOVED,
+    UI_STR_NET_INIT_FAILED,
     UI_STR_COUNT
 } ui_str_id_t;
 
@@ -45,7 +49,11 @@ static const char *s_lang_table[UI_LANG_COUNT][UI_STR_COUNT] = {
         "SSID",
         "Password",
         "Save",
-        "Calibrate"
+        "Calibrate",
+        "Wi-Fi disconnected",
+        "BLE disconnected",
+        "SD card removed",
+        "Net init: %s"
     },
     [UI_LANG_FR] = {
         "Accueil",
@@ -63,7 +71,11 @@ static const char *s_lang_table[UI_LANG_COUNT][UI_STR_COUNT] = {
         "SSID",
         "Mot de passe",
         "Sauvegarder",
-        "Calibrer"
+        "Calibrer",
+        "Wi-Fi d\xC3\xA9connect\xC3\xA9",
+        "BLE d\xC3\xA9connect\xC3\xA9",
+        "Carte SD retir\xC3\xA9e",
+        "Init r\xC3\xA9seau : %s"
     }
 };
 
@@ -117,6 +129,11 @@ void ui_load_language(ui_lang_t lang, const char *const table[])
 static const char *get_str(ui_str_id_t id)
 {
     return s_lang_table[s_lang][id];
+}
+
+const char *ui_get_str(ui_str_id_t id)
+{
+    return get_str(id);
 }
 
 static void lang_event_cb(lv_event_t *e)

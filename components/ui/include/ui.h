@@ -16,6 +16,32 @@ typedef enum {
     UI_PAGE_COUNT
 } ui_page_t;
 
+typedef enum {
+    UI_STR_HOME_TITLE,
+    UI_STR_SETTINGS_TITLE,
+    UI_STR_NETWORK_TITLE,
+    UI_STR_IMAGES_TITLE,
+    UI_STR_ENERGY_USAGE,
+    UI_STR_LANGUAGE_EN,
+    UI_STR_LANGUAGE_FR,
+    UI_STR_BRIGHTNESS,
+    UI_STR_NETWORK_FORMAT,
+    UI_STR_BLE_CONNECTED,
+    UI_STR_BLE_ADVERTISING,
+    UI_STR_WIFI_TITLE,
+    UI_STR_WIFI_SSID,
+    UI_STR_WIFI_PASS,
+    UI_STR_WIFI_SAVE,
+    UI_STR_CALIBRATE,
+    UI_STR_WIFI_DISCONNECTED,
+    UI_STR_BLE_DISCONNECTED,
+    UI_STR_SD_REMOVED,
+    UI_STR_NET_INIT_FAILED,
+    UI_STR_COUNT
+} ui_str_id_t;
+
+const char *ui_get_str(ui_str_id_t id);
+
 /** Load or replace a language table */
 void ui_load_language(ui_lang_t lang, const char *const table[]);
 

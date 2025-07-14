@@ -43,7 +43,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             ip_addr[0] = '\0';
             esp_wifi_connect();
             wifi_dirty = true;
-            ui_show_error("Wi-Fi disconnected");
+            ui_show_error(ui_get_str(UI_STR_WIFI_DISCONNECTED));
             break;
         default:
             break;
@@ -68,7 +68,7 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
         ble_connected = false;
         ble_dirty = true;
         esp_ble_gap_start_advertising(&adv_params);
-        ui_show_error("BLE disconnected");
+        ui_show_error(ui_get_str(UI_STR_BLE_DISCONNECTED));
         break;
     default:
         break;
@@ -81,7 +81,7 @@ esp_err_t network_init(void)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "nvs_flash_init failed: %s", esp_err_to_name(err));
         char msg[64];
-        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        snprintf(msg, sizeof(msg), ui_get_str(UI_STR_NET_INIT_FAILED), esp_err_to_name(err));
         ui_show_error(msg);
         return err;
     }
@@ -89,7 +89,7 @@ esp_err_t network_init(void)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_netif_init failed: %s", esp_err_to_name(err));
         char msg[64];
-        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        snprintf(msg, sizeof(msg), ui_get_str(UI_STR_NET_INIT_FAILED), esp_err_to_name(err));
         ui_show_error(msg);
         return err;
     }
@@ -97,7 +97,7 @@ esp_err_t network_init(void)
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "esp_event_loop_create_default failed: %s", esp_err_to_name(err));
         char msg[64];
-        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        snprintf(msg, sizeof(msg), ui_get_str(UI_STR_NET_INIT_FAILED), esp_err_to_name(err));
         ui_show_error(msg);
         return err;
     }
@@ -107,7 +107,7 @@ esp_err_t network_init(void)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_wifi_init failed: %s", esp_err_to_name(err));
         char msg[64];
-        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        snprintf(msg, sizeof(msg), ui_get_str(UI_STR_NET_INIT_FAILED), esp_err_to_name(err));
         ui_show_error(msg);
         return err;
     }
@@ -142,7 +142,7 @@ esp_err_t network_init(void)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_wifi_set_mode failed: %s", esp_err_to_name(err));
         char msg[64];
-        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        snprintf(msg, sizeof(msg), ui_get_str(UI_STR_NET_INIT_FAILED), esp_err_to_name(err));
         ui_show_error(msg);
         return err;
     }
@@ -150,7 +150,7 @@ esp_err_t network_init(void)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_wifi_set_config failed: %s", esp_err_to_name(err));
         char msg[64];
-        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        snprintf(msg, sizeof(msg), ui_get_str(UI_STR_NET_INIT_FAILED), esp_err_to_name(err));
         ui_show_error(msg);
         return err;
     }
@@ -160,7 +160,7 @@ esp_err_t network_init(void)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "wifi handler register failed: %s", esp_err_to_name(err));
         char msg[64];
-        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        snprintf(msg, sizeof(msg), ui_get_str(UI_STR_NET_INIT_FAILED), esp_err_to_name(err));
         ui_show_error(msg);
         return err;
     }
@@ -169,7 +169,7 @@ esp_err_t network_init(void)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "ip handler register failed: %s", esp_err_to_name(err));
         char msg[64];
-        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        snprintf(msg, sizeof(msg), ui_get_str(UI_STR_NET_INIT_FAILED), esp_err_to_name(err));
         ui_show_error(msg);
         return err;
     }
@@ -178,7 +178,7 @@ esp_err_t network_init(void)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_wifi_start failed: %s", esp_err_to_name(err));
         char msg[64];
-        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        snprintf(msg, sizeof(msg), ui_get_str(UI_STR_NET_INIT_FAILED), esp_err_to_name(err));
         ui_show_error(msg);
         return err;
     }
@@ -193,7 +193,7 @@ esp_err_t network_init(void)
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "bt mem release failed: %s", esp_err_to_name(err));
         char msg[64];
-        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        snprintf(msg, sizeof(msg), ui_get_str(UI_STR_NET_INIT_FAILED), esp_err_to_name(err));
         ui_show_error(msg);
         return err;
     }
@@ -202,7 +202,7 @@ esp_err_t network_init(void)
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "bt controller init failed: %s", esp_err_to_name(err));
         char msg[64];
-        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        snprintf(msg, sizeof(msg), ui_get_str(UI_STR_NET_INIT_FAILED), esp_err_to_name(err));
         ui_show_error(msg);
         return err;
     }
@@ -210,7 +210,7 @@ esp_err_t network_init(void)
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "bt controller enable failed: %s", esp_err_to_name(err));
         char msg[64];
-        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        snprintf(msg, sizeof(msg), ui_get_str(UI_STR_NET_INIT_FAILED), esp_err_to_name(err));
         ui_show_error(msg);
         return err;
     }
@@ -219,7 +219,7 @@ esp_err_t network_init(void)
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "bluedroid init failed: %s", esp_err_to_name(err));
         char msg[64];
-        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        snprintf(msg, sizeof(msg), ui_get_str(UI_STR_NET_INIT_FAILED), esp_err_to_name(err));
         ui_show_error(msg);
         return err;
     }
@@ -227,7 +227,7 @@ esp_err_t network_init(void)
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "bluedroid enable failed: %s", esp_err_to_name(err));
         char msg[64];
-        snprintf(msg, sizeof(msg), "Net init: %s", esp_err_to_name(err));
+        snprintf(msg, sizeof(msg), ui_get_str(UI_STR_NET_INIT_FAILED), esp_err_to_name(err));
         ui_show_error(msg);
         return err;
     }
