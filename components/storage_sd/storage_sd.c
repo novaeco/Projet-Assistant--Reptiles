@@ -70,7 +70,7 @@ void storage_sd_update(void)
     if (!d) {
         if (!card_missing) {
             ESP_LOGE(TAG, "SD card removed");
-            ui_show_error("SD card removed");
+            ui_show_error(ui_get_str(UI_STR_SD_REMOVED));
             storage_sd_unmount();
             card_missing = true;
         }
