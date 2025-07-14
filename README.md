@@ -48,13 +48,17 @@ Use `storage_sd_init()` to mount the card before loading assets. Call
 `storage_sd_unmount()` prior to removal and invoke `storage_sd_update()` in the
 main loop to detect if the card is unexpectedly removed. When removal is
 detected, an error is logged and displayed on the LVGL interface.
+Use `storage_sd_free()` to release memory obtained from `storage_sd_load()`.
 
-`storage_sd_load()` can read a file directly into memory. For example:
+`storage_sd_load()` can read a file directly into memory. The caller is
+responsible for freeing the returned buffer using `storage_sd_free()` (or
+`free()`). For example:
 
 ```c
 size_t size;
 void *data = storage_sd_load("images/picture.bin", &size);
 lv_img_set_src(img, data);
+storage_sd_free(data);
 ```
 
 ### Language Selection
