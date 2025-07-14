@@ -56,6 +56,7 @@ static lv_obj_t *home_screen;
 static lv_obj_t *settings_screen;
 static lv_obj_t *network_screen;
 static lv_obj_t *energy_bar;
+static lv_obj_t *energy_label;
 static lv_obj_t *home_title;
 static lv_obj_t *settings_title;
 static lv_obj_t *network_title;
@@ -143,6 +144,9 @@ esp_err_t ui_init(void)
     lv_obj_align(energy_bar, LV_ALIGN_CENTER, 0, 0);
     lv_bar_set_range(energy_bar, 0, 100);
 
+    energy_label = lv_label_create(home_screen);
+    lv_obj_align(energy_label, LV_ALIGN_CENTER, 0, 30);
+
     error_label = lv_label_create(home_screen);
     lv_obj_align(error_label, LV_ALIGN_BOTTOM_MID, 0, -10);
     lv_obj_set_style_text_color(error_label, lv_palette_main(LV_PALETTE_RED), 0);
@@ -202,6 +206,7 @@ void ui_set_language(ui_lang_t lang)
     lv_label_set_text(settings_title, get_str(UI_STR_SETTINGS_TITLE));
     lv_label_set_text(network_title, get_str(UI_STR_NETWORK_TITLE));
     lv_label_set_text(images_title, get_str(UI_STR_IMAGES_TITLE));
+    lv_label_set_text(energy_label, get_str(UI_STR_ENERGY_USAGE));
     lv_label_set_text(lv_obj_get_child(btn_en, 0), get_str(UI_STR_LANGUAGE_EN));
     lv_label_set_text(lv_obj_get_child(btn_fr, 0), get_str(UI_STR_LANGUAGE_FR));
     lv_label_set_text(brightness_label, get_str(UI_STR_BRIGHTNESS));
