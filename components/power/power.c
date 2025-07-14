@@ -4,6 +4,7 @@
 #include "esp_sleep.h"
 #include "esp_timer.h"
 #include "driver/gpio.h"
+#include "driver/adc.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -24,6 +25,8 @@ esp_err_t power_init(void)
         ESP_LOGE(TAG, "esp_pm_lock_create failed: %s", esp_err_to_name(err));
         return err;
     }
+    adc1_config_width(ADC_WIDTH_BIT_12);
+    adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_DB_11);
     ESP_LOGI(TAG, "Power management initialized");
 
     s_last_activity_us = esp_timer_get_time();
@@ -71,7 +74,10 @@ static void inactivity_task(void *arg)
 
 uint8_t power_get_usage_percent(void)
 {
-    return s_high_performance ? 80 : 20;
+    int raw = adc1_get_raw(ADC1_CHANNEL_0);
+    if (raw < 0) raw = 0;
+    if (raw > 4095) raw = 4095;
+    return (raw * 100) / 4095;
 }
 
 
