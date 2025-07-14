@@ -49,6 +49,14 @@ Use `storage_sd_init()` to mount the card before loading assets. Call
 main loop to detect if the card is unexpectedly removed. When removal is
 detected, an error is logged and displayed on the LVGL interface.
 
+`storage_sd_load()` can read a file directly into memory. For example:
+
+```c
+size_t size;
+void *data = storage_sd_load("images/picture.bin", &size);
+lv_img_set_src(img, data);
+```
+
 ## GPIO Assignments
 
 | Signal | ESP32-C6-LCD-1.47-M | ESP32-C6-Touch-LCD-1.47-M |

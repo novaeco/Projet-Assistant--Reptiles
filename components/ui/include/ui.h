@@ -31,3 +31,6 @@ void ui_update(void);
 /** Display an error message */
 void ui_show_error(const char *msg);
 
+/** Show SD card image browser */
+void ui_show_images(void);
+

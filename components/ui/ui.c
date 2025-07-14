@@ -2,6 +2,9 @@
 #include "lvgl.h"
 #include "power.h"
 #include "backlight.h"
+#include "storage_sd.h"
+#include <dirent.h>
+#include <stdio.h>
 
 typedef enum {
     UI_STR_HOME_TITLE,
@@ -33,6 +36,9 @@ static lv_obj_t *error_label;
 static lv_obj_t *network_label;
 static lv_obj_t *brightness_label;
 static lv_obj_t *brightness_slider;
+static lv_obj_t *images_screen;
+static lv_obj_t *images_list;
+static lv_obj_t *images_img;
 
 static const char *get_str(ui_str_id_t id)
 {
@@ -50,6 +56,34 @@ static void brightness_event_cb(lv_event_t *e)
     lv_obj_t *slider = lv_event_get_target(e);
     int16_t value = lv_slider_get_value(slider);
     backlight_set((uint8_t)value);
+}
+
+static void image_event_cb(lv_event_t *e)
+{
+    lv_obj_t *btn = lv_event_get_target(e);
+    lv_obj_t *label = lv_obj_get_child(btn, 0);
+    const char *name = lv_label_get_text(label);
+    char path[128];
+    snprintf(path, sizeof(path), "/sdcard/%s", name);
+    lv_img_set_src(images_img, path);
+}
+
+static void populate_images(void)
+{
+    lv_obj_clean(images_list);
+    DIR *d = opendir("/sdcard");
+    if (!d) return;
+    struct dirent *ent;
+    while ((ent = readdir(d)) != NULL) {
+        if (ent->d_type == DT_REG) {
+            lv_obj_t *btn = lv_btn_create(images_list);
+            lv_obj_t *lbl = lv_label_create(btn);
+            lv_label_set_text(lbl, ent->d_name);
+            lv_obj_center(lbl);
+            lv_obj_add_event_cb(btn, image_event_cb, LV_EVENT_CLICKED, NULL);
+        }
+    }
+    closedir(d);
 }
 
 esp_err_t ui_init(void)
@@ -83,6 +117,13 @@ esp_err_t ui_init(void)
     lv_label_set_text(network_title, "Network");
     network_label = lv_label_create(network_screen);
     lv_obj_align(network_label, LV_ALIGN_CENTER, 0, 0);
+
+    images_screen = lv_obj_create(NULL);
+    images_list = lv_list_create(images_screen);
+    lv_obj_set_size(images_list, 100, 200);
+    lv_obj_align(images_list, LV_ALIGN_LEFT_MID, 0, 0);
+    images_img = lv_img_create(images_screen);
+    lv_obj_align(images_img, LV_ALIGN_RIGHT_MID, -10, 0);
 
     btn_en = lv_btn_create(settings_screen);
     lv_obj_align(btn_en, LV_ALIGN_LEFT_MID, 10, 0);
@@ -133,6 +174,12 @@ void ui_show_settings(void)
 void ui_show_network(void)
 {
     lv_scr_load(network_screen);
+}
+
+void ui_show_images(void)
+{
+    populate_images();
+    lv_scr_load(images_screen);
 }
 
 void ui_update(void)
