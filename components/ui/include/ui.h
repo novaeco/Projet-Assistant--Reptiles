@@ -22,3 +22,6 @@ void ui_show_settings(void);
 /** Update widgets like energy usage */
 void ui_update(void);
 
+/** Display an error message */
+void ui_show_error(const char *msg);
+

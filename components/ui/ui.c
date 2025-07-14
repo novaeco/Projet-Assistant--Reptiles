@@ -25,6 +25,7 @@ static lv_obj_t *home_title;
 static lv_obj_t *settings_title;
 static lv_obj_t *btn_en;
 static lv_obj_t *btn_fr;
+static lv_obj_t *error_label;
 
 static const char *get_str(ui_str_id_t id)
 {
@@ -52,6 +53,11 @@ esp_err_t ui_init(void)
     lv_obj_set_size(energy_bar, 200, 20);
     lv_obj_align(energy_bar, LV_ALIGN_CENTER, 0, 0);
     lv_bar_set_range(energy_bar, 0, 100);
+
+    error_label = lv_label_create(home_screen);
+    lv_obj_align(error_label, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_set_style_text_color(error_label, lv_palette_main(LV_PALETTE_RED), 0);
+    lv_label_set_text(error_label, "");
 
     settings_screen = lv_obj_create(NULL);
     settings_title = lv_label_create(settings_screen);
@@ -96,5 +102,10 @@ void ui_show_settings(void)
 void ui_update(void)
 {
     lv_bar_set_value(energy_bar, power_get_usage_percent(), LV_ANIM_OFF);
+}
+
+void ui_show_error(const char *msg)
+{
+    lv_label_set_text(error_label, msg);
 }
 

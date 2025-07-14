@@ -4,12 +4,15 @@
 #include "driver/sdmmc_defs.h"
 #include "sdmmc_cmd.h"
 #include "esp_vfs_fat.h"
+#include "ui.h"
+#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 #define TAG "storage_sd"
 
 static sdmmc_card_t *sdcard;
+static bool card_missing;
 
 esp_err_t storage_sd_init(void)
 {
@@ -48,5 +51,31 @@ void *storage_sd_load(const char *path, size_t *size)
     }
     fclose(f);
     return buf;
+}
+
+esp_err_t storage_sd_unmount(void)
+{
+    if (!sdcard) {
+        return ESP_OK;
+    }
+    esp_vfs_fat_sdmmc_unmount("/sdcard", sdcard);
+    sdcard = NULL;
+    ESP_LOGI(TAG, "SD card unmounted");
+    return ESP_OK;
+}
+
+void storage_sd_update(void)
+{
+    DIR *d = opendir("/sdcard");
+    if (!d) {
+        if (!card_missing) {
+            ESP_LOGE(TAG, "SD card removed");
+            ui_show_error("SD card removed");
+            storage_sd_unmount();
+            card_missing = true;
+        }
+        return;
+    }
+    closedir(d);
 }
 
