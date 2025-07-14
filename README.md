@@ -35,7 +35,7 @@ Run the command from the project root to execute all unit tests using the provid
 
 ## Usage
 
-After flashing, the application brings up the ST7789 LCD with LVGL and starts scanning the keyboard matrix. Wi-Fi 6 and BLE are initialized and their status is shown on screen. LVGL assets can be loaded from a microSD card and the backlight brightness is controlled by PWM. Touch input is optional and power modes can be switched between high-performance and low-power cores.
+After flashing, the application brings up the ST7789 LCD with LVGL and starts scanning the keyboard matrix. Wi-Fi 6 and BLE are initialized and their connection state is shown on the status label. The label now updates when a BLE device connects or disconnects. LVGL assets can be loaded from a microSD card and the backlight brightness is controlled by PWM. Touch input is optional and power modes can be switched between high-performance and low-power cores.
 
 ## GPIO Assignments
 
