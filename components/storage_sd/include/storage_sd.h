@@ -8,6 +8,9 @@ esp_err_t storage_sd_init(void);
 /** Load a file into memory from the SD card */
 void *storage_sd_load(const char *path, size_t *size);
 
+/** Free memory allocated by storage_sd_load() */
+void storage_sd_free(void *buf);
+
 /** Unmount the microSD card */
 esp_err_t storage_sd_unmount(void);
 

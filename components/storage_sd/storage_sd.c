@@ -53,6 +53,11 @@ void *storage_sd_load(const char *path, size_t *size)
     return buf;
 }
 
+void storage_sd_free(void *buf)
+{
+    free(buf);
+}
+
 esp_err_t storage_sd_unmount(void)
 {
     if (!sdcard) {
