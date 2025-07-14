@@ -13,6 +13,8 @@ esp_err_t mock_esp_bt_controller_init_ret = ESP_OK;
 esp_err_t mock_esp_bt_controller_enable_ret = ESP_OK;
 esp_err_t mock_esp_bluedroid_init_ret = ESP_OK;
 esp_err_t mock_esp_bluedroid_enable_ret = ESP_OK;
+esp_err_t mock_nvs_get_ssid_ret = ESP_FAIL;
+char mock_nvs_get_ssid_value[32] = "";
 
 static lv_obj_t dummy;
 
@@ -61,7 +63,15 @@ esp_err_t nvs_open(const char *name, nvs_open_mode_t open_mode, nvs_handle_t *ou
 
 esp_err_t nvs_get_str(nvs_handle_t handle, const char *key, char *out_value, size_t *length)
 {
-    (void)handle; (void)key;
+    (void)handle;
+    if (strcmp(key, "ssid") == 0 && mock_nvs_get_ssid_ret == ESP_OK) {
+        if (out_value && length) {
+            strncpy(out_value, mock_nvs_get_ssid_value, *length);
+            out_value[*length - 1] = '\0';
+            *length = strlen(mock_nvs_get_ssid_value) + 1;
+        }
+        return ESP_OK;
+    }
     if (out_value && length && *length > 0) { out_value[0] = '\0'; *length = 1; }
     return ESP_FAIL;
 }
