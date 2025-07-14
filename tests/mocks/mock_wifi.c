@@ -71,6 +71,16 @@ esp_err_t nvs_set_str(nvs_handle_t handle, const char *key, const char *value)
     (void)handle; (void)key; (void)value; return ESP_OK;
 }
 
+esp_err_t nvs_get_u8(nvs_handle_t handle, const char *key, uint8_t *out_value)
+{
+    (void)handle; (void)key; if (out_value) *out_value = 0; return ESP_FAIL;
+}
+
+esp_err_t nvs_set_u8(nvs_handle_t handle, const char *key, uint8_t value)
+{
+    (void)handle; (void)key; (void)value; return ESP_OK;
+}
+
 esp_err_t nvs_commit(nvs_handle_t handle)
 {
     (void)handle; return ESP_OK;
