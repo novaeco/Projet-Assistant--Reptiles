@@ -4,12 +4,27 @@
 #include "esp_event.h"
 #include "nvs_flash.h"
 #include "esp_bt.h"
+#include "esp_bt_main.h"
+#include "esp_gap_ble_api.h"
+#include "esp_gatts_api.h"
 #include "lvgl.h"
 #include "sdkconfig.h"
 
 #define TAG "network"
 
 static lv_obj_t *status_label;
+static char wifi_status[64];
+static bool wifi_dirty;
+static bool ble_connected;
+static bool ble_dirty;
+static esp_ble_adv_params_t adv_params = {
+    .adv_int_min = 0x20,
+    .adv_int_max = 0x40,
+    .adv_type = ADV_TYPE_IND,
+    .own_addr_type = BLE_ADDR_TYPE_PUBLIC,
+    .channel_map = ADV_CHNL_ALL,
+    .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
+};
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data)
@@ -17,21 +32,40 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
     if (event_base == WIFI_EVENT) {
         switch (event_id) {
         case WIFI_EVENT_STA_START:
-            lv_label_set_text(status_label, "Connecting...");
+            snprintf(wifi_status, sizeof(wifi_status), "Connecting...");
             esp_wifi_connect();
+            wifi_dirty = true;
             break;
         case WIFI_EVENT_STA_DISCONNECTED:
-            lv_label_set_text(status_label, "Disconnected - reconnecting...");
+            snprintf(wifi_status, sizeof(wifi_status), "Disconnected - reconnecting...");
             esp_wifi_connect();
+            wifi_dirty = true;
             break;
         default:
             break;
         }
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
-        char buf[64];
-        snprintf(buf, sizeof(buf), "IP: " IPSTR, IP2STR(&event->ip_info.ip));
-        lv_label_set_text(status_label, buf);
+        snprintf(wifi_status, sizeof(wifi_status), "IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        wifi_dirty = true;
+    }
+}
+
+static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if,
+                                esp_ble_gatts_cb_param_t *param)
+{
+    switch (event) {
+    case ESP_GATTS_CONNECT_EVT:
+        ble_connected = true;
+        ble_dirty = true;
+        break;
+    case ESP_GATTS_DISCONNECT_EVT:
+        ble_connected = false;
+        ble_dirty = true;
+        esp_ble_gap_start_advertising(&adv_params);
+        break;
+    default:
+        break;
     }
 }
 
@@ -99,6 +133,11 @@ esp_err_t network_init(void)
         return err;
     }
 
+    snprintf(wifi_status, sizeof(wifi_status), "Connecting...");
+    wifi_dirty = true;
+    ble_connected = false;
+    ble_dirty = true;
+
     err = esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "bt mem release failed: %s", esp_err_to_name(err));
@@ -116,6 +155,21 @@ esp_err_t network_init(void)
         return err;
     }
 
+    err = esp_bluedroid_init();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "bluedroid init failed: %s", esp_err_to_name(err));
+        return err;
+    }
+    err = esp_bluedroid_enable();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "bluedroid enable failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    esp_ble_gatts_register_callback(gatts_event_handler);
+    esp_ble_gatts_app_register(0);
+    esp_ble_gap_start_advertising(&adv_params);
+
     status_label = lv_label_create(lv_scr_act());
     lv_label_set_text(status_label, "Wi-Fi/BLE starting...");
 
@@ -125,6 +179,14 @@ esp_err_t network_init(void)
 
 void network_update(void)
 {
-    /* Status is updated via Wi-Fi event callbacks */
+    if (wifi_dirty || ble_dirty) {
+        char buf[96];
+        snprintf(buf, sizeof(buf), "%s\nBLE: %s",
+                 wifi_status,
+                 ble_connected ? "Connected" : "Advertising");
+        lv_label_set_text(status_label, buf);
+        wifi_dirty = false;
+        ble_dirty = false;
+    }
 }
 
