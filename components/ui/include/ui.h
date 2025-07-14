@@ -19,6 +19,12 @@ void ui_show_home(void);
 /** Show settings screen */
 void ui_show_settings(void);
 
+/** Show network status screen */
+void ui_show_network(void);
+
+/** Update the network status information */
+void ui_update_network(const char *ssid, const char *ip, bool ble_connected);
+
 /** Update widgets like energy usage */
 void ui_update(void);
 
