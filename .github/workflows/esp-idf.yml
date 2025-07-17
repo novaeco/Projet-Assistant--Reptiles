@@ -39,10 +39,12 @@ jobs:
         $ESP_IDF_PATH/tools/idf_tools.py install-python-env
         source ~/.espressif/python_env/idf6.0_py3.12_env/bin/activate
 
-    - name: Install ESP-IDF Python requirements
-      run: |
-        export ESP_IDF_PATH="$HOME/esp/esp-idf"
-        pip install -r $ESP_IDF_PATH/requirements.txt
+  - name: Set up ESP-IDF Python environment
+  run: |
+    python3 -m pip install --user -U pip
+    python3 -m pip install --user -r $IDF_PATH/requirements.txt
+    source $IDF_PATH/export.sh
+    idf.py --version
 
     - name: Build project
       run: |
