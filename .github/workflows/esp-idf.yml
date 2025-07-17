@@ -1,65 +1,70 @@
+- **Elle n'est pas à l'intérieur de `steps:` !**
+- **Tu as déjà une étape qui s’appelle pareil juste au-dessus.**
+
+2. **Ensuite, tes autres étapes (`Build project`, `Run tests`, `Upload build artifacts`) sont bien indentées, mais tout ce qui est au même niveau que ce bloc mal indenté cause l’erreur !**
+
+---
+
+## **Correction complète (clean & pro)**
+
+```yaml
 name: ESP-IDF Build and Test
 
 on:
-  push:
-    branches:
-      - main
-      - master
-  pull_request:
+push:
+ branches:
+   - main
+   - master
+pull_request:
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+build:
+ runs-on: ubuntu-latest
 
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+ steps:
+   - name: Checkout code
+     uses: actions/checkout@v3
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.12'
+   - name: Set up Python
+     uses: actions/setup-python@v4
+     with:
+       python-version: '3.12'
 
-    - name: Install prerequisites
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y git wget flex bison gperf python3 python3-pip cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
+   - name: Install prerequisites
+     run: |
+       sudo apt-get update
+       sudo apt-get install -y git wget flex bison gperf python3 python3-pip cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
 
-    - name: Set up ESP-IDF
-      run: |
-        export ESP_IDF_PATH="$HOME/esp/esp-idf"
-        git clone --recursive https://github.com/espressif/esp-idf.git $ESP_IDF_PATH
-        . $ESP_IDF_PATH/export.sh
+   - name: Set up ESP-IDF
+     run: |
+       export ESP_IDF_PATH="$HOME/esp/esp-idf"
+       git clone --recursive https://github.com/espressif/esp-idf.git $ESP_IDF_PATH
+       . $ESP_IDF_PATH/export.sh
 
-    # Correction: installer l'environnement Python d'ESP-IDF
-    - name: Set up ESP-IDF Python environment
-      run: |
-        export ESP_IDF_PATH="$HOME/esp/esp-idf"
-        . $ESP_IDF_PATH/export.sh
-        $ESP_IDF_PATH/tools/idf_tools.py install-python-env
-        source ~/.espressif/python_env/idf6.0_py3.12_env/bin/activate
+   - name: Set up ESP-IDF Python environment
+     run: |
+       export ESP_IDF_PATH="$HOME/esp/esp-idf"
+       . $ESP_IDF_PATH/export.sh
+       $ESP_IDF_PATH/tools/idf_tools.py install-python-env
+       python3 -m pip install --user -U pip
+       python3 -m pip install --user -r $ESP_IDF_PATH/requirements.txt
+       . $ESP_IDF_PATH/export.sh
+       idf.py --version
 
-  - name: Set up ESP-IDF Python environment
-  run: |
-    python3 -m pip install --user -U pip
-    python3 -m pip install --user -r $IDF_PATH/requirements.txt
-    source $IDF_PATH/export.sh
-    idf.py --version
+   - name: Build project
+     run: |
+       export ESP_IDF_PATH="$HOME/esp/esp-idf"
+       . $ESP_IDF_PATH/export.sh
+       idf.py build
 
-    - name: Build project
-      run: |
-        export ESP_IDF_PATH="$HOME/esp/esp-idf"
-        . $ESP_IDF_PATH/export.sh
-        idf.py build
+   - name: Run tests
+     run: |
+       export ESP_IDF_PATH="$HOME/esp/esp-idf"
+       . $ESP_IDF_PATH/export.sh
+       idf.py test
 
-    - name: Run tests
-      run: |
-        export ESP_IDF_PATH="$HOME/esp/esp-idf"
-        . $ESP_IDF_PATH/export.sh
-        idf.py test
-
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: firmware
-        path: build/
+   - name: Upload build artifacts
+     uses: actions/upload-artifact@v4
+     with:
+       name: firmware
+       path: build/
