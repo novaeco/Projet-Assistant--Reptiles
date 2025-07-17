@@ -2,15 +2,12 @@ name: ESP-IDF Build and Test
 
 on:
   push:
-    branches:
-      - main
-      - master
+    branches: [ main, master ]
   pull_request:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -25,19 +22,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y git wget flex bison gperf python3 python3-pip cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
 
-      - name: Set up ESP-IDF
+      - name: Clone ESP-IDF
         run: |
-          export ESP_IDF_PATH="$HOME/esp/esp-idf"
-          git clone --recursive https://github.com/espressif/esp-idf.git $ESP_IDF_PATH
-          . $ESP_IDF_PATH/export.sh
+          mkdir -p $HOME/esp
+          git clone --recursive https://github.com/espressif/esp-idf.git $HOME/esp/esp-idf
 
-      - name: Set up ESP-IDF Python environment
+      - name: Install ESP-IDF tools
         run: |
           export ESP_IDF_PATH="$HOME/esp/esp-idf"
           . $ESP_IDF_PATH/export.sh
-          $ESP_IDF_PATH/tools/idf_tools.py install-python-env
-          python3 -m pip install --user -U pip
-          python3 -m pip install --user -r $ESP_IDF_PATH/requirements.txt
+          $ESP_IDF_PATH/install.sh    # <-- installe tout (y compris le virtualenv Python)
+
+      - name: Set up ESP-IDF environment and check version
+        run: |
+          export ESP_IDF_PATH="$HOME/esp/esp-idf"
           . $ESP_IDF_PATH/export.sh
           idf.py --version
 
