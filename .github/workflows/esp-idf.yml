@@ -2,42 +2,54 @@ name: ESP-IDF Build and Test
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
+      - master
   pull_request:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      IDF_PATH: $HOME/esp/esp-idf
+
     steps:
-      - uses: actions/checkout@v3
+    - name: Checkout code
+      uses: actions/checkout@v3
 
-      - name: Cache ESP-IDF tools
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.espressif
-          key: espidf-tools-${{ runner.os }}-v5
-          restore-keys: |
-            espidf-tools-${{ runner.os }}-
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y git wget flex bison gperf python3 python3-pip cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
+    - name: Install prerequisites
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y git wget flex bison gperf python3 python3-pip cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
 
-      - name: Clone ESP-IDF
-        run: git clone --depth 1 --branch v5.1 https://github.com/espressif/esp-idf.git $IDF_PATH
+    - name: Set up ESP-IDF
+      run: |
+        export ESP_IDF_PATH="$HOME/esp/esp-idf"
+        git clone --recursive https://github.com/espressif/esp-idf.git $ESP_IDF_PATH
+        . $ESP_IDF_PATH/export.sh
 
-      - name: Install ESP-IDF tools
-        run: $IDF_PATH/install.sh esp32c6
+    - name: Install ESP-IDF Python requirements
+      run: |
+        export ESP_IDF_PATH="$HOME/esp/esp-idf"
+        pip install -r $ESP_IDF_PATH/requirements.txt
 
-      - name: Build and Test
-        run: |
-          source $IDF_PATH/export.sh
-          python3 -m pip install --upgrade pip
-          python3 -m pip install -r $IDF_PATH/requirements.txt
-          idf.py build
-          idf.py test
-        shell: bash
+    - name: Build project
+      run: |
+        export ESP_IDF_PATH="$HOME/esp/esp-idf"
+        . $ESP_IDF_PATH/export.sh
+        idf.py build
+
+    - name: Run tests
+      run: |
+        export ESP_IDF_PATH="$HOME/esp/esp-idf"
+        . $ESP_IDF_PATH/export.sh
+        idf.py test
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: firmware
+        path: build/
