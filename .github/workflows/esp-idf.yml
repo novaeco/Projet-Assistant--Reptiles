@@ -31,6 +31,14 @@ jobs:
         git clone --recursive https://github.com/espressif/esp-idf.git $ESP_IDF_PATH
         . $ESP_IDF_PATH/export.sh
 
+    # Correction: installer l'environnement Python d'ESP-IDF
+    - name: Set up ESP-IDF Python environment
+      run: |
+        export ESP_IDF_PATH="$HOME/esp/esp-idf"
+        . $ESP_IDF_PATH/export.sh
+        $ESP_IDF_PATH/tools/idf_tools.py install-python-env
+        source ~/.espressif/python_env/idf6.0_py3.12_env/bin/activate
+
     - name: Install ESP-IDF Python requirements
       run: |
         export ESP_IDF_PATH="$HOME/esp/esp-idf"
