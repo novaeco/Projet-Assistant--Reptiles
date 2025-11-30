@@ -1,6 +1,9 @@
 #include "iot_manager.h"
 #include "mqtt_client.h"
 #include "esp_https_ota.h"
+#ifdef CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
+#include "esp_crt_bundle.h"
+#endif
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -16,7 +19,7 @@ static esp_mqtt_client_handle_t mqtt_client = NULL;
 
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
 {
-    esp_mqtt_event_handle_t event = event_data;
+    (void)event_data;
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "MQTT Connected");
@@ -73,15 +76,22 @@ void iot_mqtt_publish_stats(void)
 esp_err_t iot_ota_start(const char *url)
 {
     ESP_LOGI(TAG, "Starting OTA from %s", url);
-    
-    esp_http_client_config_t config = {
+
+    esp_http_client_config_t http_cfg = {
         .url = url,
-        .cert_pem = NULL, // For HTTP or skip cert verify
-        .skip_cert_common_name_check = true,
+        .timeout_ms = 10000,
         .keep_alive_enable = true,
+        .skip_cert_common_name_check = true,
+#ifdef CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
+        .crt_bundle_attach = esp_crt_bundle_attach,
+#endif
     };
 
-    esp_err_t ret = esp_https_ota(&config);
+    const esp_https_ota_config_t ota_cfg = {
+        .http_config = &http_cfg,
+    };
+
+    esp_err_t ret = esp_https_ota(&ota_cfg);
     if (ret == ESP_OK) {
         ESP_LOGI(TAG, "OTA Successful, restarting...");
         esp_restart();
