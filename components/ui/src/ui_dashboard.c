@@ -6,6 +6,8 @@
 #include "ui_logs.h"
 #include "ui_alerts.h"
 #include "lvgl.h"
+#include "board.h"
+#include "esp_err.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -18,6 +20,8 @@ static lv_style_t style_tile;
 static lv_style_t style_header;
 static lv_obj_t * clock_label;
 static lv_timer_t * clock_timer;
+static lv_obj_t * battery_label;
+static lv_timer_t * battery_timer;
 
 static void init_styles(void)
 {
@@ -78,6 +82,24 @@ static void clock_timer_cb(lv_timer_t * timer)
     }
 }
 
+static void battery_timer_cb(lv_timer_t * timer)
+{
+    (void)timer;
+    if (!battery_label) {
+        return;
+    }
+
+    uint8_t percent = 0;
+    uint8_t raw = 0;
+    esp_err_t err = board_get_battery_level(&percent, &raw);
+    if (err == ESP_OK) {
+        lv_label_set_text_fmt(battery_label, LV_SYMBOL_BATTERY_FULL " %u%%", (unsigned)percent);
+    } else {
+        lv_label_set_text_fmt(battery_label, LV_SYMBOL_BATTERY_EMPTY " -- (err %d)", (int)err);
+    }
+    (void)raw;
+}
+
 // =============================================================================
 // Helpers
 // =============================================================================
@@ -128,6 +150,10 @@ void ui_create_dashboard(void)
     lv_label_set_text(clock_label, "00:00");
     lv_obj_align(clock_label, LV_ALIGN_CENTER, 0, 0);
 
+    battery_label = lv_label_create(header);
+    lv_label_set_text(battery_label, LV_SYMBOL_BATTERY_EMPTY " --%");
+    lv_obj_align(battery_label, LV_ALIGN_RIGHT_MID, -40, 0);
+
     lv_obj_t * wifi_icon = lv_label_create(header);
     lv_label_set_text(wifi_icon, LV_SYMBOL_WIFI);
     lv_obj_align(wifi_icon, LV_ALIGN_RIGHT_MID, -10, 0);
@@ -136,6 +162,10 @@ void ui_create_dashboard(void)
     if (clock_timer) lv_timer_del(clock_timer);
     clock_timer = lv_timer_create(clock_timer_cb, 1000, NULL);
     clock_timer_cb(clock_timer); // Update immediately
+
+    if (battery_timer) lv_timer_del(battery_timer);
+    battery_timer = lv_timer_create(battery_timer_cb, 5000, NULL);
+    battery_timer_cb(battery_timer);
 
     // 2. Grid Container for Tiles
     static int32_t col_dsc[] = {LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};

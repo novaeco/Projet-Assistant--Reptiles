@@ -361,6 +361,32 @@ esp_err_t board_io_expander_read_inputs(uint8_t *inputs)
     return io_expander_read_reg(0x00, inputs);
 }
 
+esp_err_t board_get_battery_level(uint8_t *percent, uint8_t *raw)
+{
+    if (!percent) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t inputs = 0;
+    esp_err_t err = board_io_expander_read_inputs(&inputs);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    if (raw) {
+        *raw = inputs;
+    }
+
+    // The CH32V003 firmware exposes the battery sense as an 8-bit value on the
+    // input register (IO7). Scale linearly to 0-100% and clamp.
+    uint32_t scaled = (inputs * 100U + 127U) / 255U; // Rounded percentage
+    if (scaled > 100U) {
+        scaled = 100U;
+    }
+    *percent = (uint8_t)scaled;
+    return ESP_OK;
+}
+
 esp_lcd_panel_handle_t board_get_lcd_handle(void)
 {
     return s_lcd_panel_handle;
