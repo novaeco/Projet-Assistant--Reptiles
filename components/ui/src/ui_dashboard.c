@@ -171,11 +171,19 @@ void ui_create_dashboard(void)
     static int32_t col_dsc[] = {LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
     static int32_t row_dsc[] = {LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
 
+    lv_coord_t disp_w = 1024;
+    lv_coord_t disp_h = 600;
+    lv_display_t * display = lv_display_get_default();
+    if (display) {
+        disp_w = lv_display_get_horizontal_resolution(display);
+        disp_h = lv_display_get_vertical_resolution(display);
+    }
+
+    const lv_coord_t header_height = lv_obj_get_height(header);
+
     lv_obj_t * grid = lv_obj_create(scr);
-    lv_obj_set_size(grid, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_y(grid, 60); // Below header
-    lv_obj_set_height(grid, lv_pct(100) - 60); // Remaining height (approx)
-    lv_obj_set_size(grid, 1024, 600 - 60);
+    lv_obj_set_pos(grid, 0, header_height);
+    lv_obj_set_size(grid, disp_w, disp_h - header_height);
     
     lv_obj_set_layout(grid, LV_LAYOUT_GRID);
     lv_obj_set_grid_dsc_array(grid, col_dsc, row_dsc);
