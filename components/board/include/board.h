@@ -49,6 +49,17 @@ esp_err_t board_set_backlight_percent(uint8_t percent);
  */
 esp_err_t board_io_expander_read_inputs(uint8_t *inputs);
 
+/**
+ * @brief Read the battery level from the IO expander and convert it to
+ *        a 0-100% percentage.
+ *
+ * @param[out] percent Battery level (0-100%).
+ * @param[out] raw Optional raw 8-bit value returned by the expander (0-255).
+ *
+ * @return esp_err_t ESP_OK on success, error code otherwise.
+ */
+esp_err_t board_get_battery_level(uint8_t *percent, uint8_t *raw);
+
 #ifdef __cplusplus
 }
 #endif

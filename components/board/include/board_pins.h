@@ -5,7 +5,7 @@
 // =============================================================================
 // LCD RGB Interface (Waveshare ESP32-S3-Touch-LCD-7B)
 // =============================================================================
-#define BOARD_LCD_PIXEL_CLOCK_HZ (30 * 1000 * 1000) // 30 MHz
+#define BOARD_LCD_PIXEL_CLOCK_HZ (27 * 1000 * 1000) // 27 MHz for stable 1024x600
 #define BOARD_LCD_H_RES          1024
 #define BOARD_LCD_V_RES          600
 
