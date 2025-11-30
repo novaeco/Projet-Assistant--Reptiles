@@ -5,6 +5,7 @@
 #include "esp_log.h"
 #include "driver/i2c_master.h"
 #include "driver/spi_master.h"
+#include "driver/sdspi_host.h"
 #include "driver/gpio.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
@@ -23,6 +24,15 @@ static sdmmc_card_t *s_card = NULL;
 static i2c_master_bus_handle_t s_i2c_bus_handle = NULL;
 static i2c_master_dev_handle_t s_io_expander_dev = NULL;
 static uint8_t s_io_state = 0;
+static sdspi_dev_handle_t s_sdspi_handle = 0;
+
+static esp_err_t sdspi_transaction_with_expander(sdspi_dev_handle_t handle, sdmmc_command_t *cmd)
+{
+    io_expander_sd_cs(true);
+    esp_err_t ret = sdspi_host_do_transaction(handle, cmd);
+    io_expander_sd_cs(false);
+    return ret;
+}
 
 #define IO_EXP_PIN_TOUCH_RST 1
 #define IO_EXP_PIN_BK        2
@@ -61,6 +71,11 @@ static esp_err_t io_expander_write_reg(uint8_t reg, uint8_t value)
     return i2c_master_transmit(s_io_expander_dev, payload, sizeof(payload), pdMS_TO_TICKS(100));
 }
 
+static esp_err_t io_expander_read_reg(uint8_t reg, uint8_t *value)
+{
+    return i2c_master_transmit_receive(s_io_expander_dev, &reg, 1, value, 1, pdMS_TO_TICKS(100));
+}
+
 static esp_err_t io_expander_apply_outputs(void)
 {
     return io_expander_write_reg(0x03, s_io_state);
@@ -80,6 +95,12 @@ static esp_err_t io_expander_set_pwm(uint8_t duty)
 {
     uint8_t payload[2] = {0x05, duty};
     return i2c_master_transmit(s_io_expander_dev, payload, sizeof(payload), pdMS_TO_TICKS(100));
+}
+
+static esp_err_t io_expander_sd_cs(bool assert)
+{
+    // Active-low CS: pull low to select
+    return io_expander_set_output(IO_EXP_PIN_SD_CS, !assert);
 }
 
 static esp_err_t board_io_expander_init(void)
@@ -105,6 +126,7 @@ static esp_err_t board_io_expander_init(void)
     ESP_ERROR_CHECK(io_expander_apply_outputs());
 
     // Ensure SD card is deselected and CAN/USB defaults to USB (low)
+    ESP_ERROR_CHECK(io_expander_sd_cs(false));
     ESP_ERROR_CHECK(io_expander_set_output(IO_EXP_PIN_SD_CS, true));
     ESP_ERROR_CHECK(io_expander_set_output(IO_EXP_PIN_CAN_USB, false));
 
@@ -237,7 +259,6 @@ esp_err_t board_mount_sdcard(void)
 
     ESP_LOGI(TAG, "Initializing SD Card via SPI...");
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    host.slot = BOARD_SD_SPI_HOST;
 
     spi_bus_config_t bus_cfg = {
         .mosi_io_num = BOARD_SD_MOSI,
@@ -255,9 +276,23 @@ esp_err_t board_mount_sdcard(void)
         return ret;
     }
 
+    // Attach SD device to SPI bus without hardware CS (handled by expander)
     sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
-    slot_config.gpio_cs = BOARD_SD_CS;
-    slot_config.host_id = host.slot;
+    slot_config.host_id = BOARD_SD_SPI_HOST;
+    slot_config.gpio_cs = SDSPI_SLOT_NO_CS;
+    slot_config.gpio_int = SDSPI_SLOT_NO_INT;
+
+    ret = sdspi_host_init_device(&slot_config, &s_sdspi_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to init SDSPI device: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    host.slot = s_sdspi_handle;
+    host.do_transaction = sdspi_transaction_with_expander;
+
+    // Ensure CS is high before bus activity
+    io_expander_sd_cs(false);
 
     const char mount_point[] = "/sdcard";
     ret = esp_vfs_fat_sdspi_mount(mount_point, &host, &slot_config, &mount_config, &s_card);
@@ -289,6 +324,28 @@ esp_err_t board_init(void)
     board_mount_sdcard();
 
     return ESP_OK;
+}
+
+esp_err_t board_set_backlight_percent(uint8_t percent)
+{
+    if (percent > 100) {
+        percent = 100;
+    }
+    // Cap to ~97% to mirror Waveshare firmware safeguard
+    uint8_t duty = (uint8_t)((percent * 248) / 100);
+    esp_err_t err = io_expander_set_pwm(duty);
+    if (err != ESP_OK) {
+        return err;
+    }
+    return io_expander_set_output(IO_EXP_PIN_BK, percent > 0);
+}
+
+esp_err_t board_io_expander_read_inputs(uint8_t *inputs)
+{
+    if (!inputs) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return io_expander_read_reg(0x00, inputs);
 }
 
 esp_lcd_panel_handle_t board_get_lcd_handle(void)
