@@ -5,6 +5,9 @@
 #include "ui.h"
 #include "core_service.h"
 #include "lvgl.h"
+#if defined(LV_USE_QRCODE) && LV_USE_QRCODE
+#include "lv_qrcode.h"
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,19 +54,25 @@ static void close_qr_cb(lv_event_t * e) {
 }
 
 static void qr_btn_cb(lv_event_t * e) {
-    mbox_qr = lv_msgbox_create(scr_details, "QR Code Animal", "", NULL, true);
+    mbox_qr = lv_msgbox_create(scr_details);
+    lv_msgbox_add_title(mbox_qr, "QR Code Animal");
+    lv_msgbox_add_close_button(mbox_qr);
     lv_obj_center(mbox_qr);
-    
+
+#if defined(LV_USE_QRCODE) && LV_USE_QRCODE
     // Create QR Code
     // Size: 150px, Dark color: Black, Light color: White
     lv_obj_t * qr = lv_qrcode_create(mbox_qr, 150, lv_color_black(), lv_color_white());
-    
+
     // Data: URL to local API or just ID
     char data[128];
     // Assuming standard IP or mDNS. For now, just a fake URL structure.
     snprintf(data, sizeof(data), "http://esp32-reptile.local/api/animals/%s", current_animal_id);
     lv_qrcode_update(qr, data, strlen(data));
     lv_obj_center(qr);
+#else
+    lv_msgbox_add_text(mbox_qr, current_animal_id);
+#endif
 
     lv_obj_t * btn = lv_button_create(mbox_qr);
     lv_obj_add_event_cb(btn, close_qr_cb, LV_EVENT_CLICKED, NULL);
@@ -90,7 +99,10 @@ static void save_weight_cb(lv_event_t * e) {
 }
 
 static void add_weight_btn_cb(lv_event_t * e) {
-    mbox_weight = lv_msgbox_create(scr_details, "Ajouter Poids", "Entrez le poids en grammes:", NULL, true);
+    mbox_weight = lv_msgbox_create(scr_details);
+    lv_msgbox_add_title(mbox_weight, "Ajouter Poids");
+    lv_msgbox_add_text(mbox_weight, "Entrez le poids en grammes:");
+    lv_msgbox_add_close_button(mbox_weight);
     lv_obj_center(mbox_weight);
     
     ta_weight = lv_textarea_create(mbox_weight);
@@ -134,7 +146,9 @@ static void save_event_cb(lv_event_t * e) {
 }
 
 static void add_event_btn_cb(lv_event_t * e) {
-    mbox_event = lv_msgbox_create(scr_details, "Ajouter Evenement", "", NULL, true);
+    mbox_event = lv_msgbox_create(scr_details);
+    lv_msgbox_add_title(mbox_event, "Ajouter Evenement");
+    lv_msgbox_add_close_button(mbox_event);
     lv_obj_set_size(mbox_event, 400, 300);
     lv_obj_center(mbox_event);
 
@@ -172,7 +186,7 @@ static void build_info_tab(lv_obj_t * parent, const animal_t *animal) {
     
     // Photo
     char img_path[64];
-    snprintf(img_path, sizeof(img_path), "S:/images/Animals.jpg", animal->id); // 'S:' driver letter for FS
+    snprintf(img_path, sizeof(img_path), "S:/images/%s.jpg", animal->id); // 'S:' driver letter for FS
     // Note: LVGL file system driver must be registered with letter 'S' or similar.
     // Assuming "S:/..." maps to SD card. If not, we might need standard path "/sdcard/..." 
     // depending on how lv_fs is configured. Standard ESP-IDF LVGL often uses "/sdcard" directly if POSIX driver used,

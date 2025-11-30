@@ -153,8 +153,7 @@ esp_err_t ui_init(void)
 
     // 7. Check for PIN and decide start screen
     char pin[8] = {0};
-    size_t len = sizeof(pin);
-    if (storage_nvs_get_str("sys_pin", pin, &len) == ESP_OK && strlen(pin) > 0) {
+    if (storage_nvs_get_str("sys_pin", pin, sizeof(pin)) == ESP_OK && strlen(pin) > 0) {
         ui_create_lockscreen();
     } else {
         ui_create_dashboard();

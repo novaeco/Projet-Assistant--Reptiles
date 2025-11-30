@@ -8,6 +8,16 @@
 static lv_obj_t * ta_pin;
 static char current_pin[8] = {0};
 
+static void ui_show_msgbox(const char *title, const char *text)
+{
+    lv_obj_t * mbox = lv_msgbox_create(NULL);
+    if (title) lv_msgbox_add_title(mbox, title);
+    if (text) lv_msgbox_add_text(mbox, text);
+    lv_msgbox_add_close_button(mbox);
+    lv_msgbox_add_footer_button(mbox, "OK");
+    lv_obj_center(mbox);
+}
+
 static void kb_event_cb(lv_event_t * e)
 {
     lv_obj_t * kb = lv_event_get_target(e);
@@ -17,8 +27,7 @@ static void kb_event_cb(lv_event_t * e)
         const char * entered = lv_textarea_get_text(ta_pin);
         
         // Check PIN
-        size_t len = sizeof(current_pin);
-        if (storage_nvs_get_str("sys_pin", current_pin, &len) != ESP_OK) {
+        if (storage_nvs_get_str("sys_pin", current_pin, sizeof(current_pin)) != ESP_OK) {
             // No PIN set, allow anything or should not be here
             ui_create_dashboard();
             return;
@@ -28,8 +37,7 @@ static void kb_event_cb(lv_event_t * e)
             ui_create_dashboard();
         } else {
             lv_textarea_set_text(ta_pin, "");
-            lv_obj_t * mbox = lv_msgbox_create(NULL, "Erreur", "Code PIN Incorrect", NULL, true);
-            lv_obj_center(mbox);
+            ui_show_msgbox("Erreur", "Code PIN Incorrect");
         }
     }
 }

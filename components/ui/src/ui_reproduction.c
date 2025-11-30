@@ -56,7 +56,9 @@ static void save_repro_event_cb(lv_event_t * e) {
 }
 
 static void add_btn_cb(lv_event_t * e) {
-    mbox_add = lv_msgbox_create(scr_repro, "Ajouter Evenement", "", NULL, true);
+    mbox_add = lv_msgbox_create(scr_repro);
+    lv_msgbox_add_title(mbox_add, "Ajouter Evenement");
+    lv_msgbox_add_close_button(mbox_add);
     lv_obj_center(mbox_add);
 
     dd_type = lv_dropdown_create(mbox_add);

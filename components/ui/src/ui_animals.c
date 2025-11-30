@@ -11,6 +11,16 @@
 static lv_obj_t * ta_search;
 static lv_obj_t * list_animals;
 
+static char * ui_strdup(const char *src) {
+    if (!src) return NULL;
+    size_t len = strlen(src) + 1;
+    char *dst = malloc(len);
+    if (dst) {
+        memcpy(dst, src, len);
+    }
+    return dst;
+}
+
 static void load_animal_list(const char *query) {
     lv_obj_clean(list_animals);
     
@@ -21,7 +31,7 @@ static void load_animal_list(const char *query) {
             lv_list_add_text(list_animals, "Aucun animal trouvé.");
         } else {
             for (size_t i = 0; i < count; i++) {
-                char *id_copy = strdup(animals[i].id); 
+                char *id_copy = ui_strdup(animals[i].id);
                 char label[256];
                 snprintf(label, sizeof(label), "%s (%s)", animals[i].name, animals[i].species);
                 
@@ -68,7 +78,7 @@ static void load_animal_list_correct(const char *query) {
             lv_list_add_text(list_animals, "Aucun animal trouvé.");
         } else {
             for (size_t i = 0; i < count; i++) {
-                char *id_copy = strdup(animals[i].id); 
+                char *id_copy = ui_strdup(animals[i].id);
                 char label[256];
                 snprintf(label, sizeof(label), "%s (%s)", animals[i].name, animals[i].species);
                 
@@ -127,7 +137,7 @@ void ui_create_animal_list_screen(void)
     lv_textarea_set_one_line(ta_search, true);
     lv_textarea_set_placeholder_text(ta_search, "Rechercher...");
     lv_obj_set_size(ta_search, LV_PCT(90), 40);
-    lv_obj_align(ta_search, LV_ALIGN_TOP_CENTER, 0, 70);
+    lv_obj_align(ta_search, LV_ALIGN_TOP_MID, 0, 70);
     lv_obj_add_event_cb(ta_search, search_event_cb, LV_EVENT_ALL, NULL);
 
     // Keyboard (Hidden initially)
