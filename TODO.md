@@ -1,4 +1,5 @@
-# Pending Actions for ESP-IDF 6.1 / LVGL 9.4 Readiness
+# Actions en attente pour la préparation ESP-IDF 6.1 / LVGL 9.4
 
-- **Build & hardware validation on ESP-IDF 6.1**: Rebuild the firmware with ESP-IDF 6.1 using `sdkconfig.defaults`, then run on the Waveshare 7B to catch any compilation warnings or runtime regressions (LCD init, touch init, Wi-Fi/web, SD card mount, MQTT) and verify CAN/USB routing.
-- **Battery sensing calibration on hardware**: Measure the CH32V003 IO7 raw values at full/empty battery and set `CONFIG_BOARD_BATTERY_RAW_FULL` / `CONFIG_BOARD_BATTERY_RAW_EMPTY` accordingly so the UI percentage matches reality.
+- **Validation matérielle et de compilation sur ESP-IDF 6.1** : Recompilez le firmware avec ESP-IDF 6.1 en utilisant `sdkconfig.defaults` , puis exécutez-le sur le Waveshare 7B pour détecter tout avertissement de compilation ou régression d'exécution (initialisation LCD, initialisation tactile, Wi-Fi/web, montage de carte SD, MQTT) et vérifiez le routage CAN/USB.
+ 
+- **Calibrage de la détection de batterie sur le matériel** : Mesurez les valeurs brutes CH32V003 IO7 à batterie pleine/vide et définissez `CONFIG_BOARD_BATTERY_RAW_FULL` / `CONFIG_BOARD_BATTERY_RAW_EMPTY` en conséquence afin que le pourcentage de l'interface utilisateur corresponde à la réalité.
