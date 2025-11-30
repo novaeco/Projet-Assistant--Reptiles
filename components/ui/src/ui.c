@@ -117,7 +117,7 @@ esp_err_t ui_init(void)
 
     // 2. Get Board Handles
     s_panel_handle = board_get_lcd_handle();
-    s_touch_handle = (esp_lcd_touch_handle_t)board_get_touch_handle();
+    s_touch_handle = board_get_touch_handle();
 
     if (s_panel_handle == NULL) {
         ESP_LOGE(TAG, "Failed to get LCD handle");

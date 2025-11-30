@@ -4,6 +4,7 @@
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_rgb.h"
+#include "esp_lcd_touch.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -11,28 +12,28 @@ extern "C" {
 
 /**
  * @brief Initialize the board hardware (I2C, LCD, Touch, SD)
- * 
+ *
  * @return esp_err_t ESP_OK on success
  */
 esp_err_t board_init(void);
 
 /**
  * @brief Get the LCD panel handle
- * 
+ *
  * @return esp_lcd_panel_handle_t Handle to the RGB panel
  */
 esp_lcd_panel_handle_t board_get_lcd_handle(void);
 
 /**
- * @brief Get the Touch handle (void* for now, or specific type if driver included)
- * 
- * @return void* Handle to the touch device
+ * @brief Get the Touch handle
+ *
+ * @return esp_lcd_touch_handle_t Handle to the touch device
  */
-void* board_get_touch_handle(void);
+esp_lcd_touch_handle_t board_get_touch_handle(void);
 
 /**
  * @brief Mount the SD card to /sdcard
- * 
+ *
  * @return esp_err_t ESP_OK on success
  */
 esp_err_t board_mount_sdcard(void);
@@ -40,3 +41,4 @@ esp_err_t board_mount_sdcard(void);
 #ifdef __cplusplus
 }
 #endif
+
