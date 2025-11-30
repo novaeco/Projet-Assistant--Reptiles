@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include "board.h"
 #include "board_pins.h"
+#include "sdkconfig.h"
 #include "esp_log.h"
 #include "driver/i2c_master.h"
 #include "driver/spi_master.h"
@@ -378,13 +379,35 @@ esp_err_t board_get_battery_level(uint8_t *percent, uint8_t *raw)
     }
 
     // The CH32V003 firmware exposes the battery sense as an 8-bit value on the
-    // input register (IO7). Scale linearly to 0-100% and clamp.
-    uint32_t scaled = (inputs * 100U + 127U) / 255U; // Rounded percentage
+    // input register (IO7). Scale linearly between CONFIG_BOARD_BATTERY_RAW_EMPTY
+    // and CONFIG_BOARD_BATTERY_RAW_FULL to obtain a 0-100% rounded percentage.
+    uint32_t raw_full = CONFIG_BOARD_BATTERY_RAW_FULL;
+    uint32_t raw_empty = CONFIG_BOARD_BATTERY_RAW_EMPTY;
+    if (raw_full <= raw_empty) {
+        raw_full = raw_empty + 1; // avoid divide-by-zero
+    }
+
+    int32_t adjusted = (int32_t)inputs - (int32_t)raw_empty;
+    if (adjusted < 0) {
+        adjusted = 0;
+    }
+
+    uint32_t span = raw_full - raw_empty;
+    uint32_t scaled = ((uint32_t)adjusted * 100U + span / 2U) / span;
     if (scaled > 100U) {
         scaled = 100U;
     }
+
     *percent = (uint8_t)scaled;
     return ESP_OK;
+}
+
+esp_err_t board_set_can_mode(bool enable_can)
+{
+    if (!s_io_expander_dev) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return io_expander_set_output(IO_EXP_PIN_CAN_USB, enable_can);
 }
 
 esp_lcd_panel_handle_t board_get_lcd_handle(void)

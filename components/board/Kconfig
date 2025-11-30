@@ -1,0 +1,19 @@
+menu "Board configuration"
+
+config BOARD_BATTERY_RAW_FULL
+    int "Battery ADC full-scale raw value"
+    range 1 255
+    default 255
+    help
+        Raw 8-bit value reported on IO7 by the CH32V003 expander when the battery
+        is at 100% charge. Used to scale the battery percentage in board_get_battery_level.
+
+config BOARD_BATTERY_RAW_EMPTY
+    int "Battery ADC empty raw value"
+    range 0 254
+    default 0
+    help
+        Raw 8-bit value reported on IO7 by the CH32V003 expander when the battery
+        is considered empty. Used as the lower bound for percentage scaling.
+
+endmenu
