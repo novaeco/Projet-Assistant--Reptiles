@@ -4,6 +4,7 @@
 #include "net_manager.h"
 #include "iot_manager.h"
 #include "core_export.h" // Include export
+#include "board.h"
 #include "lvgl.h"
 #include <stdio.h>
 #include <string.h>
@@ -13,6 +14,8 @@ static lv_obj_t * ta_pwd;
 static lv_obj_t * ta_ota_url;
 static lv_obj_t * ta_pin;
 static lv_obj_t * kb;
+static lv_obj_t * slider_bl;
+static lv_obj_t * label_bl_value;
 
 static void back_event_cb(lv_event_t * e)
 {
@@ -58,6 +61,30 @@ static void ota_btn_cb(lv_event_t * e)
     if (strlen(url) > 0) {
         iot_ota_start(url);
     }
+}
+
+static void update_backlight_label(int32_t percent)
+{
+    if (percent < 0) {
+        percent = 0;
+    } else if (percent > 100) {
+        percent = 100;
+    }
+    if (label_bl_value) {
+        lv_label_set_text_fmt(label_bl_value, "Luminosite: %d%%", (int)percent);
+    }
+}
+
+static void backlight_event_cb(lv_event_t * e)
+{
+    if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) {
+        return;
+    }
+
+    int32_t percent = lv_slider_get_value(slider_bl);
+    board_set_backlight_percent((uint8_t)percent);
+    storage_nvs_set_i32("backlight_pct", percent);
+    update_backlight_label(percent);
 }
 
 static void ta_event_cb(lv_event_t * e)
@@ -155,6 +182,29 @@ void ui_create_settings_screen(void)
     lv_obj_t * btn_ota = lv_button_create(cont);
     lv_obj_add_event_cb(btn_ota, ota_btn_cb, LV_EVENT_CLICKED, NULL);
     lv_label_set_text(lv_label_create(btn_ota), "Mettre a jour");
+
+    // Backlight control
+    lv_obj_t * l_bl = lv_label_create(cont);
+    lv_label_set_text(l_bl, "Ecran");
+    lv_obj_set_style_margin_top(l_bl, 20, 0);
+
+    slider_bl = lv_slider_create(cont);
+    lv_slider_set_range(slider_bl, 0, 100);
+
+    int32_t stored_bl = 100;
+    if (storage_nvs_get_i32("backlight_pct", &stored_bl) != ESP_OK) {
+        stored_bl = 100;
+    }
+    if (stored_bl < 0) {
+        stored_bl = 0;
+    } else if (stored_bl > 100) {
+        stored_bl = 100;
+    }
+    lv_slider_set_value(slider_bl, stored_bl, LV_ANIM_OFF);
+    lv_obj_add_event_cb(slider_bl, backlight_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    label_bl_value = lv_label_create(cont);
+    update_backlight_label(stored_bl);
 
     kb = lv_keyboard_create(scr);
     lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
