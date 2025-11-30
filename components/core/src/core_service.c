@@ -13,6 +13,7 @@ static const char *TAG = "CORE";
 #define ANIMAL_DIR "/sdcard/animals"
 #define REPORT_DIR "/sdcard/reports"
 #define LOG_FILE   "/sdcard/audit.log"
+#define FILEPATH_BUF_LEN 512
 
 static void ensure_dirs(void) {
     struct stat st = {0};
@@ -77,7 +78,7 @@ esp_err_t core_save_animal(const animal_t *animal) {
         cJSON_AddItemToObject(root, "events", e_array);
     }
 
-    char filepath[512];
+    char filepath[FILEPATH_BUF_LEN];
     int n = snprintf(filepath, sizeof(filepath), "%s/%s.json", ANIMAL_DIR, animal->id);
     if (n < 0 || n >= (int)sizeof(filepath)) {
         ESP_LOGW(TAG, "Path too long, skipping save: dir=%s id=%s", ANIMAL_DIR, animal->id);
@@ -91,7 +92,7 @@ esp_err_t core_save_animal(const animal_t *animal) {
 }
 
 esp_err_t core_get_animal(const char *id, animal_t *out_animal) {
-    char filepath[512];
+    char filepath[FILEPATH_BUF_LEN];
     int n = snprintf(filepath, sizeof(filepath), "%s/%s.json", ANIMAL_DIR, id);
     if (n < 0 || n >= (int)sizeof(filepath)) {
         ESP_LOGW(TAG, "Path too long when loading animal: dir=%s id=%s", ANIMAL_DIR, id);
@@ -180,7 +181,7 @@ esp_err_t core_search_animals(const char *query, animal_summary_t **out_list, si
                 count++;
             } else {
                 // Need to load to check name/species
-                char filepath[512];
+                char filepath[FILEPATH_BUF_LEN];
                 int path_len = snprintf(filepath, sizeof(filepath), "%s/%s", ANIMAL_DIR, entry->d_name);
                 if (path_len < 0 || path_len >= (int)sizeof(filepath)) {
                     ESP_LOGW(TAG, "Path too long, skipping entry: dir=%s name=%s", ANIMAL_DIR, entry->d_name);
@@ -210,7 +211,7 @@ esp_err_t core_search_animals(const char *query, animal_summary_t **out_list, si
     size_t idx = 0;
     while ((entry = readdir(dir)) != NULL) {
         if (strstr(entry->d_name, ".json")) {
-            char filepath[512];
+            char filepath[FILEPATH_BUF_LEN];
             int path_len = snprintf(filepath, sizeof(filepath), "%s/%s", ANIMAL_DIR, entry->d_name);
             if (path_len < 0 || path_len >= (int)sizeof(filepath)) {
                 ESP_LOGW(TAG, "Path too long, skipping entry: dir=%s name=%s", ANIMAL_DIR, entry->d_name);
@@ -297,7 +298,7 @@ esp_err_t core_get_alerts(char ***out_list, size_t *out_count) {
     // Pass 1: Count
     while ((entry = readdir(dir)) != NULL) {
         if (strstr(entry->d_name, ".json")) {
-            char filepath[512];
+            char filepath[FILEPATH_BUF_LEN];
             int path_len = snprintf(filepath, sizeof(filepath), "%s/%s", ANIMAL_DIR, entry->d_name);
             if (path_len < 0 || path_len >= (int)sizeof(filepath)) {
                 ESP_LOGW(TAG, "Path too long, skipping entry: dir=%s name=%s", ANIMAL_DIR, entry->d_name);
@@ -336,7 +337,7 @@ esp_err_t core_get_alerts(char ***out_list, size_t *out_count) {
     size_t idx = 0;
     while ((entry = readdir(dir)) != NULL) {
         if (strstr(entry->d_name, ".json")) {
-            char filepath[512];
+            char filepath[FILEPATH_BUF_LEN];
             int path_len = snprintf(filepath, sizeof(filepath), "%s/%s", ANIMAL_DIR, entry->d_name);
             if (path_len < 0 || path_len >= (int)sizeof(filepath)) {
                 ESP_LOGW(TAG, "Path too long, skipping entry: dir=%s name=%s", ANIMAL_DIR, entry->d_name);
@@ -392,7 +393,7 @@ esp_err_t core_generate_report(const char *animal_id) {
     animal_t animal;
     if (core_get_animal(animal_id, &animal) != ESP_OK) return ESP_FAIL;
     ensure_dirs();
-    char filepath[512];
+    char filepath[FILEPATH_BUF_LEN];
     int path_len = snprintf(filepath, sizeof(filepath), "%s/Report_%s.txt", REPORT_DIR, animal.name);
     if (path_len < 0 || path_len >= (int)sizeof(filepath)) {
         ESP_LOGW(TAG, "Path too long for report: dir=%s name=%s", REPORT_DIR, animal.name);
