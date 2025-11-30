@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include "esp_err.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
@@ -51,7 +52,8 @@ esp_err_t board_io_expander_read_inputs(uint8_t *inputs);
 
 /**
  * @brief Read the battery level from the IO expander and convert it to
- *        a 0-100% percentage.
+ *        a 0-100% percentage using the calibrated raw full/empty values from
+ *        menuconfig (CONFIG_BOARD_BATTERY_RAW_FULL/EMPTY).
  *
  * @param[out] percent Battery level (0-100%).
  * @param[out] raw Optional raw 8-bit value returned by the expander (0-255).
@@ -59,6 +61,14 @@ esp_err_t board_io_expander_read_inputs(uint8_t *inputs);
  * @return esp_err_t ESP_OK on success, error code otherwise.
  */
 esp_err_t board_get_battery_level(uint8_t *percent, uint8_t *raw);
+
+/**
+ * @brief Route the shared connector to the CAN transceiver or USB bridge.
+ *
+ * @param enable_can True to enable CAN transceiver mode (IO expander pin
+ *                   IO_EXP_PIN_CAN_USB high), false to keep USB bridge active.
+ */
+esp_err_t board_set_can_mode(bool enable_can);
 
 #ifdef __cplusplus
 }
