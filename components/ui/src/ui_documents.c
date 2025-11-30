@@ -4,6 +4,17 @@
 #include "lvgl.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
+static char * ui_strdup(const char *src) {
+    if (!src) return NULL;
+    size_t len = strlen(src) + 1;
+    char *dst = malloc(len);
+    if (dst) {
+        memcpy(dst, src, len);
+    }
+    return dst;
+}
 
 static void back_event_cb(lv_event_t * e)
 {
@@ -36,7 +47,7 @@ static void generate_btn_event_cb(lv_event_t * e)
         // Show list of animals to select
         // For simplicity in this MVP, we just pick the first animal or show a simple list
         // Here we create a simple modal-like list
-        lv_obj_t * scr = lv_screen_get_active();
+        lv_obj_t * scr = lv_screen_active();
         
         lv_obj_t * mbox = lv_obj_create(scr);
         lv_obj_set_size(mbox, LV_PCT(80), LV_PCT(80));
@@ -53,7 +64,7 @@ static void generate_btn_event_cb(lv_event_t * e)
         size_t count = 0;
         if (core_list_animals(&animals, &count) == ESP_OK) {
             for (size_t i = 0; i < count; i++) {
-                char *id_copy = strdup(animals[i].id); // Leak for MVP simplicity
+                char *id_copy = ui_strdup(animals[i].id); // Leak for MVP simplicity
                 lv_obj_t * btn = lv_list_add_btn(list, NULL, animals[i].name);
                 lv_obj_add_event_cb(btn, animal_select_event_cb, LV_EVENT_CLICKED, id_copy);
             }
@@ -108,7 +119,7 @@ void ui_create_documents_screen(void)
     // 4. Generate Button
     lv_obj_t * btn_gen = lv_button_create(scr);
     lv_obj_set_size(btn_gen, 200, 50);
-    lv_obj_align(btn_gen, LV_ALIGN_BOTTOM_CENTER, 0, -20);
+    lv_obj_align(btn_gen, LV_ALIGN_BOTTOM_MID, 0, -20);
     lv_obj_set_style_bg_color(btn_gen, lv_palette_main(LV_PALETTE_BLUE), 0);
     lv_obj_add_event_cb(btn_gen, generate_btn_event_cb, LV_EVENT_CLICKED, NULL);
     

@@ -189,17 +189,17 @@ void ui_create_dashboard(void)
     lv_obj_set_grid_dsc_array(grid, col_dsc, row_dsc);
     lv_obj_set_style_bg_opa(grid, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(grid, 0, 0);
-    lv_obj_set_pad_all(grid, 20);
+    lv_obj_set_style_pad_all(grid, 20, 0);
     lv_obj_set_style_grid_column_dsc_array(grid, col_dsc, 0);
     lv_obj_set_style_grid_row_dsc_array(grid, row_dsc, 0);
-    lv_obj_set_style_grid_row_gap(grid, 20, 0);
-    lv_obj_set_style_grid_column_gap(grid, 20, 0);
+    lv_obj_set_style_pad_row(grid, 20, 0);
+    lv_obj_set_style_pad_column(grid, 20, 0);
 
     // 3. Create Tiles
     // Row 0
     create_tile(grid, LV_SYMBOL_LIST, "Fiches Animaux", 0, 0, 1, 1, false);
     create_tile(grid, LV_SYMBOL_FILE, "Documents", 1, 0, 1, 1, false);
-    create_tile(grid, LV_SYMBOL_GLOBE, "Requêtes Web", 2, 0, 1, 1, false);
+    create_tile(grid, LV_SYMBOL_WIFI, "Requêtes Web", 2, 0, 1, 1, false);
 
     // Row 1
     create_tile(grid, LV_SYMBOL_EDIT, "Journaux", 0, 1, 1, 1, false);

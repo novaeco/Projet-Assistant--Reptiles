@@ -4,6 +4,7 @@
 #include "lvgl.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 static void back_event_cb(lv_event_t * e)

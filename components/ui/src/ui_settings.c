@@ -17,6 +17,17 @@ static lv_obj_t * kb;
 static lv_obj_t * slider_bl;
 static lv_obj_t * label_bl_value;
 
+static lv_obj_t * ui_msgbox_notify(const char *title, const char *text)
+{
+    lv_obj_t * mbox = lv_msgbox_create(NULL);
+    if (title) lv_msgbox_add_title(mbox, title);
+    if (text) lv_msgbox_add_text(mbox, text);
+    lv_msgbox_add_close_button(mbox);
+    lv_msgbox_add_footer_button(mbox, "OK");
+    lv_obj_center(mbox);
+    return mbox;
+}
+
 static void back_event_cb(lv_event_t * e)
 {
     ui_create_dashboard();
@@ -31,8 +42,7 @@ static void save_wifi_cb(lv_event_t * e)
         storage_nvs_set_str("wifi_ssid", ssid);
         storage_nvs_set_str("wifi_pwd", pwd);
         net_connect(ssid, pwd);
-        lv_obj_t * mbox = lv_msgbox_create(NULL, "Info", "WiFi credentials saved.", NULL, true);
-        lv_obj_center(mbox);
+        ui_msgbox_notify("Info", "WiFi credentials saved.");
     }
 }
 
@@ -40,18 +50,15 @@ static void save_pin_cb(lv_event_t * e)
 {
     const char * pin = lv_textarea_get_text(ta_pin);
     storage_nvs_set_str("sys_pin", pin);
-    lv_obj_t * mbox = lv_msgbox_create(NULL, "Info", "Code PIN enregistre.", NULL, true);
-    lv_obj_center(mbox);
+    ui_msgbox_notify("Info", "Code PIN enregistre.");
 }
 
 static void export_cb(lv_event_t * e)
 {
     if (core_export_csv("/sdcard/export.csv") == ESP_OK) {
-        lv_obj_t * mbox = lv_msgbox_create(NULL, "Succes", "Export CSV termine:\n/sdcard/export.csv", NULL, true);
-        lv_obj_center(mbox);
+        ui_msgbox_notify("Succes", "Export CSV termine:\n/sdcard/export.csv");
     } else {
-        lv_obj_t * mbox = lv_msgbox_create(NULL, "Erreur", "Echec de l'export.", NULL, true);
-        lv_obj_center(mbox);
+        ui_msgbox_notify("Erreur", "Echec de l'export.");
     }
 }
 
