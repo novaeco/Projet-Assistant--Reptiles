@@ -10,7 +10,9 @@
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_rgb.h"
+#include "esp_lcd_panel_io_i2c.h"
 #include "esp_lcd_touch.h"
+#include "esp_lcd_touch_gt911.h"
 #include "esp_vfs_fat.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -25,6 +27,8 @@ static i2c_master_bus_handle_t s_i2c_bus_handle = NULL;
 static i2c_master_dev_handle_t s_io_expander_dev = NULL;
 static uint8_t s_io_state = 0;
 static sdspi_dev_handle_t s_sdspi_handle = 0;
+
+static esp_err_t io_expander_sd_cs(bool assert);
 
 static esp_err_t sdspi_transaction_with_expander(sdspi_dev_handle_t handle, sdmmc_command_t *cmd)
 {
@@ -159,8 +163,7 @@ static esp_err_t board_lcd_init(void)
 
     esp_lcd_rgb_panel_config_t panel_config = {
         .data_width = 16, // RGB565
-        .psram_trans_align = 64,
-        .num_fbufs = 2,   // Double buffer in PSRAM
+        .num_fbs = 2,   // Double buffer in PSRAM
         .clk_src = LCD_CLK_SRC_DEFAULT,
         .disp_gpio_num = BOARD_LCD_DISP,
         .pclk_gpio_num = BOARD_LCD_PCLK,
