@@ -10,7 +10,9 @@
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_rgb.h"
+#include "esp_lcd_panel_io_i2c.h"
 #include "esp_lcd_touch.h"
+#include "esp_lcd_touch_gt911.h"
 #include "esp_vfs_fat.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -25,6 +27,8 @@ static i2c_master_bus_handle_t s_i2c_bus_handle = NULL;
 static i2c_master_dev_handle_t s_io_expander_dev = NULL;
 static uint8_t s_io_state = 0;
 static sdspi_dev_handle_t s_sdspi_handle = 0;
+
+static esp_err_t io_expander_sd_cs(bool assert);
 
 static esp_err_t sdspi_transaction_with_expander(sdspi_dev_handle_t handle, sdmmc_command_t *cmd)
 {
@@ -159,8 +163,7 @@ static esp_err_t board_lcd_init(void)
 
     esp_lcd_rgb_panel_config_t panel_config = {
         .data_width = 16, // RGB565
-        .psram_trans_align = 64,
-        .num_fbufs = 2,   // Double buffer in PSRAM
+        .num_fbs = 2,   // Double buffer in PSRAM
         .clk_src = LCD_CLK_SRC_DEFAULT,
         .disp_gpio_num = BOARD_LCD_DISP,
         .pclk_gpio_num = BOARD_LCD_PCLK,
@@ -228,7 +231,17 @@ static esp_err_t board_touch_init(void)
     ESP_ERROR_CHECK(gpio_config(&int_cfg));
 
     esp_lcd_panel_io_handle_t io_handle = NULL;
-    esp_lcd_panel_io_i2c_config_t io_conf = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
+    esp_lcd_panel_io_i2c_config_t io_conf = {
+        .dev_addr = ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS,
+        .scl_speed_hz = BOARD_I2C_FREQ_HZ,
+        .control_phase_bytes = 1,
+        .dc_bit_offset = 0,
+        .lcd_cmd_bits = 16,
+        .lcd_param_bits = 8,
+        .flags = {
+            .disable_control_phase = 1,
+        },
+    };
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(s_i2c_bus_handle, &io_conf, &io_handle));
 
     esp_lcd_touch_config_t tp_cfg = {
