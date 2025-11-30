@@ -231,7 +231,17 @@ static esp_err_t board_touch_init(void)
     ESP_ERROR_CHECK(gpio_config(&int_cfg));
 
     esp_lcd_panel_io_handle_t io_handle = NULL;
-    esp_lcd_panel_io_i2c_config_t io_conf = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
+    esp_lcd_panel_io_i2c_config_t io_conf = {
+        .dev_addr = ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS,
+        .scl_speed_hz = BOARD_I2C_FREQ_HZ,
+        .control_phase_bytes = 1,
+        .dc_bit_offset = 0,
+        .lcd_cmd_bits = 16,
+        .lcd_param_bits = 8,
+        .flags = {
+            .disable_control_phase = 1,
+        },
+    };
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(s_i2c_bus_handle, &io_conf, &io_handle));
 
     esp_lcd_touch_config_t tp_cfg = {
