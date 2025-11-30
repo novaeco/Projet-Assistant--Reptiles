@@ -127,6 +127,7 @@ static esp_err_t board_io_expander_init(void)
 
     // Ensure SD card is deselected and CAN/USB defaults to USB (low)
     ESP_ERROR_CHECK(io_expander_sd_cs(false));
+    ESP_ERROR_CHECK(io_expander_set_output(IO_EXP_PIN_SD_CS, true));
     ESP_ERROR_CHECK(io_expander_set_output(IO_EXP_PIN_CAN_USB, false));
 
     // Enable panel power
