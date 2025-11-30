@@ -31,6 +31,17 @@ void app_main(void)
     // 2. Initialize Board (GPIO, Power, LCD, Touch, SD Card mounting)
     ESP_ERROR_CHECK(board_init());
 
+    // Restore backlight level if saved
+    int32_t backlight_pct = 100;
+    if (storage_nvs_get_i32("backlight_pct", &backlight_pct) == ESP_OK) {
+        if (backlight_pct < 0) {
+            backlight_pct = 0;
+        } else if (backlight_pct > 100) {
+            backlight_pct = 100;
+        }
+    }
+    board_set_backlight_percent((uint8_t)backlight_pct);
+
     // 3. Initialize Network (WiFi Stack, SNTP)
     ESP_ERROR_CHECK(net_init());
 
