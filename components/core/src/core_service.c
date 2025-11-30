@@ -77,8 +77,13 @@ esp_err_t core_save_animal(const animal_t *animal) {
         cJSON_AddItemToObject(root, "events", e_array);
     }
 
-    char filepath[128];
-    snprintf(filepath, sizeof(filepath), "%s/%s.json", ANIMAL_DIR, animal->id);
+    char filepath[512];
+    int n = snprintf(filepath, sizeof(filepath), "%s/%s.json", ANIMAL_DIR, animal->id);
+    if (n < 0 || n >= (int)sizeof(filepath)) {
+        ESP_LOGW(TAG, "Path too long, skipping save: dir=%s id=%s", ANIMAL_DIR, animal->id);
+        cJSON_Delete(root);
+        return ESP_ERR_INVALID_SIZE;
+    }
     esp_err_t ret = storage_json_save(filepath, root);
     cJSON_Delete(root);
     if (ret == ESP_OK) core_log_event(LOG_LEVEL_AUDIT, "CORE", "Animal saved");
@@ -86,8 +91,12 @@ esp_err_t core_save_animal(const animal_t *animal) {
 }
 
 esp_err_t core_get_animal(const char *id, animal_t *out_animal) {
-    char filepath[128];
-    snprintf(filepath, sizeof(filepath), "%s/%s.json", ANIMAL_DIR, id);
+    char filepath[512];
+    int n = snprintf(filepath, sizeof(filepath), "%s/%s.json", ANIMAL_DIR, id);
+    if (n < 0 || n >= (int)sizeof(filepath)) {
+        ESP_LOGW(TAG, "Path too long when loading animal: dir=%s id=%s", ANIMAL_DIR, id);
+        return ESP_ERR_INVALID_SIZE;
+    }
     cJSON *root = storage_json_load(filepath);
     if (!root) return ESP_FAIL;
     memset(out_animal, 0, sizeof(animal_t));
@@ -171,7 +180,12 @@ esp_err_t core_search_animals(const char *query, animal_summary_t **out_list, si
                 count++;
             } else {
                 // Need to load to check name/species
-                char filepath[128]; snprintf(filepath, sizeof(filepath), "%s/%s", ANIMAL_DIR, entry->d_name);
+                char filepath[512];
+                int path_len = snprintf(filepath, sizeof(filepath), "%s/%s", ANIMAL_DIR, entry->d_name);
+                if (path_len < 0 || path_len >= (int)sizeof(filepath)) {
+                    ESP_LOGW(TAG, "Path too long, skipping entry: dir=%s name=%s", ANIMAL_DIR, entry->d_name);
+                    continue;
+                }
                 cJSON *root = storage_json_load(filepath);
                 if (root) {
                     cJSON *name = cJSON_GetObjectItem(root, "name");
@@ -196,7 +210,12 @@ esp_err_t core_search_animals(const char *query, animal_summary_t **out_list, si
     size_t idx = 0;
     while ((entry = readdir(dir)) != NULL) {
         if (strstr(entry->d_name, ".json")) {
-            char filepath[128]; snprintf(filepath, sizeof(filepath), "%s/%s", ANIMAL_DIR, entry->d_name);
+            char filepath[512];
+            int path_len = snprintf(filepath, sizeof(filepath), "%s/%s", ANIMAL_DIR, entry->d_name);
+            if (path_len < 0 || path_len >= (int)sizeof(filepath)) {
+                ESP_LOGW(TAG, "Path too long, skipping entry: dir=%s name=%s", ANIMAL_DIR, entry->d_name);
+                continue;
+            }
             cJSON *root = storage_json_load(filepath);
             if (root) {
                 if (!cJSON_IsTrue(cJSON_GetObjectItem(root, "is_deleted"))) {
@@ -278,7 +297,12 @@ esp_err_t core_get_alerts(char ***out_list, size_t *out_count) {
     // Pass 1: Count
     while ((entry = readdir(dir)) != NULL) {
         if (strstr(entry->d_name, ".json")) {
-            char filepath[128]; snprintf(filepath, sizeof(filepath), "%s/%s", ANIMAL_DIR, entry->d_name);
+            char filepath[512];
+            int path_len = snprintf(filepath, sizeof(filepath), "%s/%s", ANIMAL_DIR, entry->d_name);
+            if (path_len < 0 || path_len >= (int)sizeof(filepath)) {
+                ESP_LOGW(TAG, "Path too long, skipping entry: dir=%s name=%s", ANIMAL_DIR, entry->d_name);
+                continue;
+            }
             cJSON *root = storage_json_load(filepath);
             if (root) {
                 if (!cJSON_IsTrue(cJSON_GetObjectItem(root, "is_deleted"))) {
@@ -312,7 +336,12 @@ esp_err_t core_get_alerts(char ***out_list, size_t *out_count) {
     size_t idx = 0;
     while ((entry = readdir(dir)) != NULL) {
         if (strstr(entry->d_name, ".json")) {
-            char filepath[128]; snprintf(filepath, sizeof(filepath), "%s/%s", ANIMAL_DIR, entry->d_name);
+            char filepath[512];
+            int path_len = snprintf(filepath, sizeof(filepath), "%s/%s", ANIMAL_DIR, entry->d_name);
+            if (path_len < 0 || path_len >= (int)sizeof(filepath)) {
+                ESP_LOGW(TAG, "Path too long, skipping entry: dir=%s name=%s", ANIMAL_DIR, entry->d_name);
+                continue;
+            }
             cJSON *root = storage_json_load(filepath);
             if (root) {
                 if (!cJSON_IsTrue(cJSON_GetObjectItem(root, "is_deleted"))) {
@@ -363,7 +392,13 @@ esp_err_t core_generate_report(const char *animal_id) {
     animal_t animal;
     if (core_get_animal(animal_id, &animal) != ESP_OK) return ESP_FAIL;
     ensure_dirs();
-    char filepath[128]; snprintf(filepath, sizeof(filepath), "%s/Report_%s.txt", REPORT_DIR, animal.name);
+    char filepath[512];
+    int path_len = snprintf(filepath, sizeof(filepath), "%s/Report_%s.txt", REPORT_DIR, animal.name);
+    if (path_len < 0 || path_len >= (int)sizeof(filepath)) {
+        ESP_LOGW(TAG, "Path too long for report: dir=%s name=%s", REPORT_DIR, animal.name);
+        core_free_animal_content(&animal);
+        return ESP_ERR_INVALID_SIZE;
+    }
     FILE *f = fopen(filepath, "w");
     if (!f) { core_free_animal_content(&animal); return ESP_FAIL; }
     fprintf(f, "FICHE D'IDENTIFICATION\n======================\n\nNom: %s\nEspece: %s\n", animal.name, animal.species);
