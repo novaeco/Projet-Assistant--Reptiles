@@ -45,7 +45,7 @@
 #define BOARD_I2C_PORT           I2C_NUM_0
 #define BOARD_I2C_SDA            GPIO_NUM_8
 #define BOARD_I2C_SCL            GPIO_NUM_9
-#define BOARD_I2C_FREQ_HZ        400000
+#define BOARD_I2C_FREQ_HZ        100000
 
 // Touch GT911
 #define BOARD_TOUCH_INT          GPIO_NUM_4
