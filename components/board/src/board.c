@@ -359,12 +359,12 @@ esp_err_t board_mount_sdcard(void)
     board_delay_for_sd();
 
     // Retry a few times with progressive frequency to cope with slow cards
-    const int max_attempts = 3;
-    const int freq_table[max_attempts] = {1000, 5000, 20000}; // kHz
+    static const int freq_table_khz[] = {1000, 5000, 20000};
+    const size_t max_attempts = sizeof(freq_table_khz) / sizeof(freq_table_khz[0]);
 
-    for (int attempt = 0; attempt < max_attempts; ++attempt) {
-        host.max_freq_khz = freq_table[attempt];
-        ESP_LOGI(TAG, "SD attempt %d/%d @ %dkHz", attempt + 1, max_attempts, host.max_freq_khz);
+    for (size_t attempt = 0; attempt < max_attempts; ++attempt) {
+        host.max_freq_khz = freq_table_khz[attempt];
+        ESP_LOGI(TAG, "SD attempt %d/%d @ %dkHz", (int)(attempt + 1), (int)max_attempts, host.max_freq_khz);
 
         // Toggle CS high between attempts
         io_expander_sd_cs(false);
