@@ -61,10 +61,8 @@ void app_main(void)
     // Optional: Check for saved WiFi credentials and connect
     char ssid[32] = {0};
     char pwd[64] = {0};
-    size_t len = sizeof(ssid);
-    if (storage_nvs_get_str("wifi_ssid", ssid, &len) == ESP_OK && strlen(ssid) > 0) {
-        len = sizeof(pwd);
-        storage_nvs_get_str("wifi_pwd", pwd, &len);
+    if (storage_nvs_get_str("wifi_ssid", ssid, sizeof(ssid)) == ESP_OK && strlen(ssid) > 0) {
+        storage_nvs_get_str("wifi_pwd", pwd, sizeof(pwd));
         ESP_LOGI(TAG, "Found saved WiFi credentials, connecting to %s...", ssid);
         net_connect(ssid, pwd);
     } else {

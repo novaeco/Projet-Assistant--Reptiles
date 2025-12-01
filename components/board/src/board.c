@@ -337,6 +337,18 @@ esp_err_t board_init(void)
     ESP_ERROR_CHECK(board_touch_init());
     board_mount_sdcard();
 
+    uint8_t batt_pct = 0;
+    uint8_t batt_raw = 0;
+    esp_err_t batt_err = board_get_battery_level(&batt_pct, &batt_raw);
+    if (batt_err == ESP_OK) {
+        ESP_LOGI(TAG, "Battery raw=%u, empty=%u, full=%u -> %u%%", batt_raw,
+                 (unsigned)CONFIG_BOARD_BATTERY_RAW_EMPTY,
+                 (unsigned)CONFIG_BOARD_BATTERY_RAW_FULL,
+                 batt_pct);
+    } else {
+        ESP_LOGW(TAG, "Battery read failed: %s", esp_err_to_name(batt_err));
+    }
+
     return ESP_OK;
 }
 
@@ -347,6 +359,7 @@ esp_err_t board_set_backlight_percent(uint8_t percent)
     }
     // Cap to ~97% to mirror Waveshare firmware safeguard
     uint8_t duty = (uint8_t)((percent * 248) / 100);
+    ESP_LOGD(TAG, "Backlight percent=%u -> duty=%u", percent, duty);
     esp_err_t err = io_expander_set_pwm(duty);
     if (err != ESP_OK) {
         return err;
