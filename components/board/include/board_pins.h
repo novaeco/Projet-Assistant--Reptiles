@@ -40,7 +40,7 @@
 #define BOARD_LCD_DATA_R4        GPIO_NUM_40 // R7
 
 // =============================================================================
-// I2C Bus (Touch GT911 & IO Expander CH32V003)
+// I2C Bus (Touch GT911 & IO Expander CH422G)
 // =============================================================================
 #define BOARD_I2C_PORT           I2C_NUM_0
 #define BOARD_I2C_SDA            GPIO_NUM_8
@@ -51,7 +51,7 @@
 #define BOARD_TOUCH_INT          GPIO_NUM_4
 #define BOARD_TOUCH_RST          GPIO_NUM_NC // Reset controlled via IO Expander
 
-// IO Expander CH32V003
+// IO Expander CH422G
 #define BOARD_IO_EXP_ADDR        0x24
 
 // =============================================================================

@@ -138,7 +138,7 @@ static esp_err_t io_expander_sd_cs(bool assert)
 
 static esp_err_t board_io_expander_init(void)
 {
-    ESP_LOGI(TAG, "Initializing IO Expander (CH32V003)...");
+    ESP_LOGI(TAG, "Initializing IO Expander (CH422G)...");
 
     if (!s_i2c_bus_handle) {
         ESP_LOGE(TAG, "I2C bus not ready for IO expander");
@@ -154,17 +154,17 @@ static esp_err_t board_io_expander_init(void)
     // Configure direction: IO0-IO6 outputs, IO7 left as input (battery sense)
     ESP_ERROR_CHECK(io_expander_write_reg(0x02, 0x7F));
 
-    // Start with everything low for a clean state
-    s_io_state = 0x00;
-    ESP_ERROR_CHECK(io_expander_apply_outputs());
-
-    // Ensure SD card is deselected and CAN/USB defaults to USB (low)
-    ESP_ERROR_CHECK(io_expander_sd_cs(false));
+    // Default outputs high for inactive CS / released resets / power enables
+    s_io_state = 0;
+    ESP_ERROR_CHECK(io_expander_set_output(IO_EXP_PIN_LCD_VDD, true));
+    ESP_ERROR_CHECK(io_expander_set_output(IO_EXP_PIN_BK, true));
+    ESP_ERROR_CHECK(io_expander_set_output(IO_EXP_PIN_TOUCH_RST, true));
     ESP_ERROR_CHECK(io_expander_set_output(IO_EXP_PIN_SD_CS, true));
     ESP_ERROR_CHECK(io_expander_set_output(IO_EXP_PIN_CAN_USB, false));
+    ESP_ERROR_CHECK(io_expander_apply_outputs());
+    ESP_LOGI(TAG, "EXIO configured (CH422G): LCD_VDD_EN=1, BK_EN=1, TP_RST=1, SD_CS=1");
 
-    // Enable panel power
-    ESP_ERROR_CHECK(io_expander_set_output(IO_EXP_PIN_LCD_VDD, true));
+    // Allow panel power to settle before reset sequence
     vTaskDelay(pdMS_TO_TICKS(10));
 
     // Hold LCD reset low, then release
@@ -172,11 +172,7 @@ static esp_err_t board_io_expander_init(void)
     vTaskDelay(pdMS_TO_TICKS(5));
     ESP_ERROR_CHECK(io_expander_set_output(IO_EXP_PIN_LCD_RST, true));
 
-    // Keep touch reset asserted low until touch init handles it
-    ESP_ERROR_CHECK(io_expander_set_output(IO_EXP_PIN_TOUCH_RST, false));
-
     // Turn on backlight fully via digital enable
-    ESP_ERROR_CHECK(io_expander_set_output(IO_EXP_PIN_BK, true));
     ESP_ERROR_CHECK(io_expander_set_pwm(0xFF));
 
     return ESP_OK;
@@ -255,11 +251,13 @@ static esp_err_t board_touch_init(void)
     ESP_ERROR_CHECK(gpio_config(&int_cfg));
     ESP_ERROR_CHECK(gpio_set_level(BOARD_TOUCH_INT, 1));
 
-    // Reset GT911 through IO expander
+    // Reset GT911 through IO expander (EXIO1)
+    ESP_ERROR_CHECK(io_expander_set_output(IO_EXP_PIN_TOUCH_RST, true));
+    vTaskDelay(pdMS_TO_TICKS(2));
     ESP_ERROR_CHECK(io_expander_set_output(IO_EXP_PIN_TOUCH_RST, false));
     vTaskDelay(pdMS_TO_TICKS(10));
     ESP_ERROR_CHECK(io_expander_set_output(IO_EXP_PIN_TOUCH_RST, true));
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(80));
 
     // Set INT back to input for interrupt signaling
     int_cfg.mode = GPIO_MODE_INPUT;
@@ -290,7 +288,13 @@ static esp_err_t board_touch_init(void)
 
     esp_err_t err = esp_lcd_touch_new_i2c_gt911(io_handle, &tp_cfg, &s_touch_handle);
     if (err == ESP_OK) {
-        ESP_LOGI(TAG, "GT911 ready on I2C addr 0x%02X, INT=%d", ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS, BOARD_TOUCH_INT);
+        ESP_LOGI(TAG, "GT911 init OK on I2C addr 0x%02X, INT=%d", ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS, BOARD_TOUCH_INT);
+        esp_lcd_touch_read_data(s_touch_handle);
+        uint16_t sample_x[1] = {0};
+        uint16_t sample_y[1] = {0};
+        uint8_t sample_cnt = 0;
+        bool pressed = esp_lcd_touch_get_coordinates(s_touch_handle, sample_x, sample_y, NULL, &sample_cnt, 1);
+        ESP_LOGI(TAG, "GT911 sample: pressed=%d count=%u x=%u y=%u", pressed, sample_cnt, sample_x[0], sample_y[0]);
     }
     return err;
 }
@@ -309,6 +313,7 @@ esp_err_t board_mount_sdcard(void)
 
     ESP_LOGI(TAG, "Initializing SD Card via SPI...");
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
+    host.max_freq_khz = 1000; // Start slow for reliable bring-up
 
     spi_bus_config_t bus_cfg = {
         .mosi_io_num = BOARD_SD_MOSI,

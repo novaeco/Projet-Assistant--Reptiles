@@ -31,12 +31,16 @@ static esp_lcd_touch_handle_t s_touch_handle = NULL;
 // =============================================================================
 
 // Callback from the RGB panel driver when a frame transfer is done
-static bool on_vsync_event(esp_lcd_panel_handle_t panel, const esp_lcd_rgb_panel_event_data_t *event_data, void *user_data)
+static volatile bool s_vsync_fired = false;
+static volatile bool s_flush_waiting = false;
+static bool s_use_vsync = false;
+
+static bool IRAM_ATTR on_vsync_event(esp_lcd_panel_handle_t panel, const esp_lcd_rgb_panel_event_data_t *event_data, void *user_data)
 {
-    lv_display_t *disp = (lv_display_t *)user_data;
-    if (disp) {
-        lv_display_flush_ready(disp);
-    }
+    (void)panel;
+    (void)event_data;
+    (void)user_data;
+    s_vsync_fired = true;
     return false;
 }
 
@@ -54,6 +58,16 @@ static void ui_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_m
     int y2 = area->y2 + 1;
 
     esp_lcd_panel_draw_bitmap(s_panel_handle, x1, y1, x2, y2, px_map);
+    if (s_use_vsync) {
+        s_vsync_fired = false;
+    }
+    s_flush_waiting = true;
+
+    // If vsync callback registration failed, complete immediately
+    if (!s_use_vsync) {
+        s_flush_waiting = false;
+        lv_display_flush_ready(disp);
+    }
 }
 
 // =============================================================================
@@ -101,6 +115,13 @@ static void ui_task(void *arg)
     ESP_LOGI(TAG, "LVGL Task Started");
     while (1) {
         uint32_t time_till_next = lv_timer_handler();
+
+        if (s_use_vsync && s_flush_waiting && s_vsync_fired) {
+            s_vsync_fired = false;
+            s_flush_waiting = false;
+            lv_display_flush_ready(s_disp);
+        }
+
         vTaskDelay(pdMS_TO_TICKS(time_till_next > 10 ? time_till_next : 10));
     }
 }
@@ -135,7 +156,13 @@ esp_err_t ui_init(void)
     esp_lcd_rgb_panel_event_callbacks_t callbacks = {
         .on_vsync = on_vsync_event,
     };
-    ESP_ERROR_CHECK(esp_lcd_rgb_panel_register_event_callbacks(s_panel_handle, &callbacks, s_disp));
+    esp_err_t cb_err = esp_lcd_rgb_panel_register_event_callbacks(s_panel_handle, &callbacks, s_disp);
+    if (cb_err != ESP_OK) {
+        ESP_LOGW(TAG, "VSync callback registration failed: %s (continuing without IRAM callback)", esp_err_to_name(cb_err));
+        s_use_vsync = false;
+    } else {
+        s_use_vsync = true;
+    }
 
     // 5. Set Buffers (Direct Mode with RGB Panel Buffers)
     void *buf1 = NULL;
