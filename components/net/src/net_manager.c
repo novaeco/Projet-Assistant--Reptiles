@@ -53,12 +53,14 @@ esp_err_t net_init(void)
                                                         NULL));
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_LOGI(TAG, "Starting Wi-Fi station...");
     ESP_ERROR_CHECK(esp_wifi_start());
 
     // Init SNTP
     esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
     esp_sntp_setservername(0, "pool.ntp.org");
     esp_sntp_init();
+    ESP_LOGI(TAG, "SNTP client initialized (pool.ntp.org)");
 
     return ESP_OK;
 }

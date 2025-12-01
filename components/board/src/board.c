@@ -161,6 +161,12 @@ static esp_err_t board_io_expander_init(void)
 static esp_err_t board_lcd_init(void)
 {
     ESP_LOGI(TAG, "Initializing RGB LCD Panel...");
+    ESP_LOGI(TAG,
+             "LCD timing: %ux%u @ %.2f MHz (hsync bp/fp/pw=%u/%u/%u, vsync bp/fp/pw=%u/%u/%u)",
+             BOARD_LCD_H_RES, BOARD_LCD_V_RES,
+             (double)BOARD_LCD_PIXEL_CLOCK_HZ / 1e6,
+             152, 48, 162,
+             13, 3, 45);
 
     esp_lcd_rgb_panel_config_t panel_config = {
         .data_width = 16, // RGB565
@@ -335,7 +341,23 @@ esp_err_t board_init(void)
     ESP_ERROR_CHECK(board_io_expander_init());
     ESP_ERROR_CHECK(board_lcd_init());
     ESP_ERROR_CHECK(board_touch_init());
-    board_mount_sdcard();
+
+    esp_err_t sd_err = board_mount_sdcard();
+    if (sd_err != ESP_OK) {
+        ESP_LOGW(TAG, "SD card not mounted: %s", esp_err_to_name(sd_err));
+    }
+
+    uint8_t batt_pct = 0;
+    uint8_t batt_raw = 0;
+    esp_err_t batt_err = board_get_battery_level(&batt_pct, &batt_raw);
+    if (batt_err == ESP_OK) {
+        ESP_LOGI(TAG, "Battery raw=%u, empty=%u, full=%u -> %u%%", batt_raw,
+                 (unsigned)CONFIG_BOARD_BATTERY_RAW_EMPTY,
+                 (unsigned)CONFIG_BOARD_BATTERY_RAW_FULL,
+                 batt_pct);
+    } else {
+        ESP_LOGW(TAG, "Battery read failed: %s", esp_err_to_name(batt_err));
+    }
 
     uint8_t batt_pct = 0;
     uint8_t batt_raw = 0;
