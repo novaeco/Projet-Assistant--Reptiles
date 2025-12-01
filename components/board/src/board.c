@@ -18,6 +18,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sdmmc_cmd.h"
+#include "reptile_storage.h"
 
 static const char *TAG = "BOARD";
 
@@ -28,6 +29,33 @@ static i2c_master_bus_handle_t s_i2c_bus_handle = NULL;
 static i2c_master_dev_handle_t s_io_expander_dev = NULL;
 static uint8_t s_io_state = 0;
 static sdspi_dev_handle_t s_sdspi_handle = 0;
+static uint8_t s_batt_raw_empty = CONFIG_BOARD_BATTERY_RAW_EMPTY;
+static uint8_t s_batt_raw_full = CONFIG_BOARD_BATTERY_RAW_FULL;
+
+static esp_err_t board_load_battery_calibration(void)
+{
+    int32_t stored_empty = 0;
+    int32_t stored_full = 0;
+
+    esp_err_t err_empty = storage_nvs_get_i32("battery_raw_empty", &stored_empty);
+    esp_err_t err_full = storage_nvs_get_i32("battery_raw_full", &stored_full);
+
+    if (err_empty == ESP_OK && err_full == ESP_OK) {
+        if (stored_empty < 0 || stored_empty > 255 || stored_full < 0 || stored_full > 255 || stored_full <= stored_empty) {
+            ESP_LOGW(TAG, "Invalid battery calibration in NVS (empty=%ld, full=%ld), using defaults", (long)stored_empty, (long)stored_full);
+            return ESP_ERR_INVALID_STATE;
+        }
+        s_batt_raw_empty = (uint8_t)stored_empty;
+        s_batt_raw_full = (uint8_t)stored_full;
+        ESP_LOGI(TAG, "Battery calibration loaded from NVS: empty=%u, full=%u", s_batt_raw_empty, s_batt_raw_full);
+        return ESP_OK;
+    }
+
+    s_batt_raw_empty = CONFIG_BOARD_BATTERY_RAW_EMPTY;
+    s_batt_raw_full = CONFIG_BOARD_BATTERY_RAW_FULL;
+    ESP_LOGI(TAG, "Battery calibration defaults applied: empty=%u, full=%u", s_batt_raw_empty, s_batt_raw_full);
+    return ESP_ERR_NOT_FOUND;
+}
 
 static esp_err_t io_expander_sd_cs(bool assert);
 
@@ -160,13 +188,13 @@ static esp_err_t board_io_expander_init(void)
 
 static esp_err_t board_lcd_init(void)
 {
-    ESP_LOGI(TAG, "Initializing RGB LCD Panel...");
+    ESP_LOGI(TAG, "Initializing RGB LCD Panel %ux%u @ %.2f MHz", BOARD_LCD_H_RES, BOARD_LCD_V_RES,
+             (double)BOARD_LCD_PIXEL_CLOCK_HZ / 1e6);
     ESP_LOGI(TAG,
-             "LCD timing: %ux%u @ %.2f MHz (hsync bp/fp/pw=%u/%u/%u, vsync bp/fp/pw=%u/%u/%u)",
-             BOARD_LCD_H_RES, BOARD_LCD_V_RES,
-             (double)BOARD_LCD_PIXEL_CLOCK_HZ / 1e6,
+             "LCD timing (hsync bp/fp/pw=%u/%u/%u, vsync bp/fp/pw=%u/%u/%u) disp=%d pclk=%d vsync=%d hsync=%d de=%d",
              152, 48, 162,
-             13, 3, 45);
+             13, 3, 45,
+             BOARD_LCD_DISP, BOARD_LCD_PCLK, BOARD_LCD_VSYNC, BOARD_LCD_HSYNC, BOARD_LCD_DE);
 
     esp_lcd_rgb_panel_config_t panel_config = {
         .data_width = 16, // RGB565
@@ -260,9 +288,11 @@ static esp_err_t board_touch_init(void)
         .flags = {.swap_xy = 0, .mirror_x = 0, .mirror_y = 0},
     };
 
-    ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_gt911(io_handle, &tp_cfg, &s_touch_handle));
-
-    return ESP_OK;
+    esp_err_t err = esp_lcd_touch_new_i2c_gt911(io_handle, &tp_cfg, &s_touch_handle);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "GT911 ready on I2C addr 0x%02X, INT=%d", ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS, BOARD_TOUCH_INT);
+    }
+    return err;
 }
 
 // =============================================================================
@@ -340,23 +370,22 @@ esp_err_t board_init(void)
     ESP_ERROR_CHECK(board_i2c_init());
     ESP_ERROR_CHECK(board_io_expander_init());
     ESP_ERROR_CHECK(board_lcd_init());
-    ESP_ERROR_CHECK(board_touch_init());
+
+    esp_err_t touch_err = board_touch_init();
+    if (touch_err != ESP_OK) {
+        ESP_LOGW(TAG, "Touch init failed: %s (touch disabled)", esp_err_to_name(touch_err));
+        s_touch_handle = NULL;
+    }
 
     esp_err_t sd_err = board_mount_sdcard();
     if (sd_err != ESP_OK) {
         ESP_LOGW(TAG, "SD card not mounted: %s", esp_err_to_name(sd_err));
     }
 
-    uint8_t batt_pct = 0;
-    uint8_t batt_raw = 0;
-    esp_err_t batt_err = board_get_battery_level(&batt_pct, &batt_raw);
-    if (batt_err == ESP_OK) {
-        ESP_LOGI(TAG, "Battery raw=%u, empty=%u, full=%u -> %u%%", batt_raw,
-                 (unsigned)CONFIG_BOARD_BATTERY_RAW_EMPTY,
-                 (unsigned)CONFIG_BOARD_BATTERY_RAW_FULL,
-                 batt_pct);
-    } else {
-        ESP_LOGW(TAG, "Battery read failed: %s", esp_err_to_name(batt_err));
+    esp_err_t calib_err = board_load_battery_calibration();
+    if (calib_err != ESP_OK) {
+        ESP_LOGW(TAG, "Battery calibration defaults in use (%u-%u) (err=%s)",
+                 (unsigned)s_batt_raw_empty, (unsigned)s_batt_raw_full, esp_err_to_name(calib_err));
     }
 
     uint8_t batt_pct = 0;
@@ -364,8 +393,8 @@ esp_err_t board_init(void)
     esp_err_t batt_err = board_get_battery_level(&batt_pct, &batt_raw);
     if (batt_err == ESP_OK) {
         ESP_LOGI(TAG, "Battery raw=%u, empty=%u, full=%u -> %u%%", batt_raw,
-                 (unsigned)CONFIG_BOARD_BATTERY_RAW_EMPTY,
-                 (unsigned)CONFIG_BOARD_BATTERY_RAW_FULL,
+                 (unsigned)s_batt_raw_empty,
+                 (unsigned)s_batt_raw_full,
                  batt_pct);
     } else {
         ESP_LOGW(TAG, "Battery read failed: %s", esp_err_to_name(batt_err));
@@ -397,6 +426,41 @@ esp_err_t board_io_expander_read_inputs(uint8_t *inputs)
     return io_expander_read_reg(0x00, inputs);
 }
 
+esp_err_t board_battery_set_calibration(uint8_t raw_empty, uint8_t raw_full)
+{
+    if (raw_full <= raw_empty) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    s_batt_raw_empty = raw_empty;
+    s_batt_raw_full = raw_full;
+
+    esp_err_t err_empty = storage_nvs_set_i32("battery_raw_empty", raw_empty);
+    esp_err_t err_full = storage_nvs_set_i32("battery_raw_full", raw_full);
+    if (err_empty != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to store battery_raw_empty: %s", esp_err_to_name(err_empty));
+        return err_empty;
+    }
+    if (err_full != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to store battery_raw_full: %s", esp_err_to_name(err_full));
+        return err_full;
+    }
+
+    ESP_LOGI(TAG, "Battery calibration updated: empty=%u, full=%u", s_batt_raw_empty, s_batt_raw_full);
+    return ESP_OK;
+}
+
+esp_err_t board_battery_get_calibration(uint8_t *raw_empty, uint8_t *raw_full)
+{
+    if (raw_empty) {
+        *raw_empty = s_batt_raw_empty;
+    }
+    if (raw_full) {
+        *raw_full = s_batt_raw_full;
+    }
+    return ESP_OK;
+}
+
 esp_err_t board_get_battery_level(uint8_t *percent, uint8_t *raw)
 {
     if (!percent) {
@@ -416,8 +480,8 @@ esp_err_t board_get_battery_level(uint8_t *percent, uint8_t *raw)
     // The CH32V003 firmware exposes the battery sense as an 8-bit value on the
     // input register (IO7). Scale linearly between CONFIG_BOARD_BATTERY_RAW_EMPTY
     // and CONFIG_BOARD_BATTERY_RAW_FULL to obtain a 0-100% rounded percentage.
-    uint32_t raw_full = CONFIG_BOARD_BATTERY_RAW_FULL;
-    uint32_t raw_empty = CONFIG_BOARD_BATTERY_RAW_EMPTY;
+    uint32_t raw_full = s_batt_raw_full;
+    uint32_t raw_empty = s_batt_raw_empty;
     if (raw_full <= raw_empty) {
         raw_full = raw_empty + 1; // avoid divide-by-zero
     }

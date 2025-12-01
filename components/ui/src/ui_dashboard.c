@@ -95,7 +95,7 @@ static void battery_timer_cb(lv_timer_t * timer)
     if (err == ESP_OK) {
         lv_label_set_text_fmt(battery_label, LV_SYMBOL_BATTERY_FULL " %u%%", (unsigned)percent);
     } else {
-        lv_label_set_text_fmt(battery_label, LV_SYMBOL_BATTERY_EMPTY " -- (err %d)", (int)err);
+        lv_label_set_text(battery_label, LV_SYMBOL_BATTERY_EMPTY " N/A");
     }
     (void)raw;
 }
