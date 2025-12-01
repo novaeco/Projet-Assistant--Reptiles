@@ -16,4 +16,12 @@ config BOARD_BATTERY_RAW_EMPTY
         Raw 8-bit value reported on IO7 by the CH32V003 expander when the battery
         is considered empty. Used as the lower bound for percentage scaling.
 
+config BOARD_SD_HOLD_CS_LOW_DIAG
+    bool "Force SD CS low during SDSPI init (diagnostic)"
+    default n
+    help
+        Hold EXIO4 (SD_CS via CH422G) low throughout SDSPI initialisation and
+        transactions. Useful for diagnosing CS gating/timeout issues coming from
+        the IO expander. Disable for normal operation.
+
 endmenu

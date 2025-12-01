@@ -3,6 +3,7 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
+#include "esp_system.h"
 
 #include "board.h"
 #include "reptile_storage.h"
@@ -16,7 +17,9 @@ static const char *TAG = "MAIN";
 
 void app_main(void)
 {
+    esp_reset_reason_t reset_reason = esp_reset_reason();
     ESP_LOGI(TAG, "Starting Assistant Administratif Reptiles...");
+    ESP_LOGI(TAG, "Reset reason: %d", reset_reason);
 
     // 1. Initialize Storage (NVS + FS)
     esp_err_t ret = nvs_flash_init();
@@ -77,4 +80,9 @@ void app_main(void)
     }
 
     ESP_LOGI(TAG, "System Initialized Successfully.");
+
+    // Keep app_main alive to avoid returning to RTOS idle
+    while (true) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
 }
