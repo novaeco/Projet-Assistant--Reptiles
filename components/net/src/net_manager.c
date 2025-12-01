@@ -16,16 +16,23 @@ static void event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data)
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+        ESP_LOGI(TAG, "Wi-Fi STA start, attempting initial connect");
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         is_connected = false;
         net_server_stop(); // Stop server on disconnect
-        ESP_LOGI(TAG, "Disconnected. Retrying...");
+        wifi_event_sta_disconnected_t *disc = (wifi_event_sta_disconnected_t *)event_data;
+        ESP_LOGW(TAG, "Wi-Fi disconnected (reason=%d). Retrying...", disc ? disc->reason : -1);
         esp_wifi_connect();
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
-        ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
+        ESP_LOGI(TAG, "Got IP: " IPSTR " (netmask=" IPSTR ", gw=" IPSTR ")",
+                 IP2STR(&event->ip_info.ip), IP2STR(&event->ip_info.netmask), IP2STR(&event->ip_info.gw));
         is_connected = true;
+        wifi_ap_record_t ap_info = {0};
+        if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+            ESP_LOGI(TAG, "Connected SSID=%s RSSI=%d dBm", (char *)ap_info.ssid, ap_info.rssi);
+        }
         net_server_start(); // Start server on connect
     }
 }

@@ -53,7 +53,7 @@ esp_err_t board_io_expander_read_inputs(uint8_t *inputs);
 /**
  * @brief Read the battery level from the IO expander and convert it to
  *        a 0-100% percentage using the calibrated raw full/empty values from
- *        menuconfig (CONFIG_BOARD_BATTERY_RAW_FULL/EMPTY).
+ *        menuconfig (CONFIG_BOARD_BATTERY_RAW_FULL/EMPTY) or values stored in NVS.
  *
  * @param[out] percent Battery level (0-100%).
  * @param[out] raw Optional raw 8-bit value returned by the expander (0-255).
@@ -61,6 +61,16 @@ esp_err_t board_io_expander_read_inputs(uint8_t *inputs);
  * @return esp_err_t ESP_OK on success, error code otherwise.
  */
 esp_err_t board_get_battery_level(uint8_t *percent, uint8_t *raw);
+
+/**
+ * @brief Persist battery calibration raw values to NVS and update runtime copy.
+ */
+esp_err_t board_battery_set_calibration(uint8_t raw_empty, uint8_t raw_full);
+
+/**
+ * @brief Read the current battery calibration (defaults or NVS-backed).
+ */
+esp_err_t board_battery_get_calibration(uint8_t *raw_empty, uint8_t *raw_full);
 
 /**
  * @brief Route the shared connector to the CAN transceiver or USB bridge.

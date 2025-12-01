@@ -73,7 +73,13 @@ esp_err_t storage_nvs_get_str(const char *key, char *out_value, size_t max_len)
             err = ESP_ERR_NVS_INVALID_LENGTH;
         } else {
             err = nvs_get_str(my_handle, key, out_value, &required_size);
+            if (err == ESP_OK && max_len > 0) {
+                out_value[max_len - 1] = '\0';
+            }
         }
+    }
+    if (err != ESP_OK && max_len > 0) {
+        out_value[0] = '\0';
     }
     nvs_close(my_handle);
     return err;
