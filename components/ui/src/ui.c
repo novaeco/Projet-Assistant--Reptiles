@@ -156,6 +156,7 @@ esp_err_t ui_init(void)
     esp_lcd_rgb_panel_event_callbacks_t callbacks = {
         .on_vsync = on_vsync_event,
     };
+#ifdef CONFIG_ESP_LCD_RGB_ISR_IRAM_SAFE
     esp_err_t cb_err = esp_lcd_rgb_panel_register_event_callbacks(s_panel_handle, &callbacks, s_disp);
     if (cb_err != ESP_OK) {
         ESP_LOGW(TAG, "VSync callback registration failed: %s (continuing without IRAM callback)", esp_err_to_name(cb_err));
@@ -163,6 +164,10 @@ esp_err_t ui_init(void)
     } else {
         s_use_vsync = true;
     }
+#else
+    ESP_LOGW(TAG, "RGB ISR IRAM safety disabled in sdkconfig; skipping vsync callback registration.");
+    s_use_vsync = false;
+#endif
 
     // 5. Set Buffers (Direct Mode with RGB Panel Buffers)
     void *buf1 = NULL;

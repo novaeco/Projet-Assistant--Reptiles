@@ -57,6 +57,12 @@ static esp_err_t board_load_battery_calibration(void)
     return ESP_ERR_NOT_FOUND;
 }
 
+static void board_delay_for_sd(void)
+{
+    // Give the card/expander some time to settle before toggling CS
+    vTaskDelay(pdMS_TO_TICKS(20));
+}
+
 static esp_err_t io_expander_sd_cs(bool assert);
 
 static esp_err_t sdspi_transaction_with_expander(sdspi_dev_handle_t handle, sdmmc_command_t *cmd)
@@ -313,7 +319,7 @@ esp_err_t board_mount_sdcard(void)
 
     ESP_LOGI(TAG, "Initializing SD Card via SPI...");
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    host.max_freq_khz = 1000; // Start slow for reliable bring-up
+    host.max_freq_khz = 1000; // start slow, will be increased once stable
 
     spi_bus_config_t bus_cfg = {
         .mosi_io_num = BOARD_SD_MOSI,
@@ -346,24 +352,40 @@ esp_err_t board_mount_sdcard(void)
     host.slot = s_sdspi_handle;
     host.do_transaction = sdspi_transaction_with_expander;
 
-    // Ensure CS is high before bus activity
-    io_expander_sd_cs(false);
-
     const char mount_point[] = "/sdcard";
-    ret = esp_vfs_fat_sdspi_mount(mount_point, &host, &slot_config, &mount_config, &s_card);
 
-    if (ret != ESP_OK) {
-        if (ret == ESP_FAIL) {
-            ESP_LOGE(TAG, "Failed to mount filesystem.");
-        } else {
-            ESP_LOGE(TAG, "Failed to initialize the card (%s).", esp_err_to_name(ret));
+    // Ensure CS is high before bus activity and allow the card to power up
+    io_expander_sd_cs(false);
+    board_delay_for_sd();
+
+    // Retry a few times with progressive frequency to cope with slow cards
+    const int max_attempts = 3;
+    const int freq_table[max_attempts] = {1000, 5000, 20000}; // kHz
+
+    for (int attempt = 0; attempt < max_attempts; ++attempt) {
+        host.max_freq_khz = freq_table[attempt];
+        ESP_LOGI(TAG, "SD attempt %d/%d @ %dkHz", attempt + 1, max_attempts, host.max_freq_khz);
+
+        // Toggle CS high between attempts
+        io_expander_sd_cs(false);
+        board_delay_for_sd();
+
+        ret = esp_vfs_fat_sdspi_mount(mount_point, &host, &slot_config, &mount_config, &s_card);
+        if (ret == ESP_OK) {
+            ESP_LOGI(TAG, "SD Card mounted at %s", mount_point);
+            sdmmc_card_print_info(stdout, s_card);
+            return ESP_OK;
         }
-        return ret;
+
+        ESP_LOGW(TAG, "SD mount failed (attempt %d): %s", attempt + 1, esp_err_to_name(ret));
     }
 
-    ESP_LOGI(TAG, "SD Card mounted at %s", mount_point);
-    sdmmc_card_print_info(stdout, s_card);
-    return ESP_OK;
+    if (ret == ESP_FAIL) {
+        ESP_LOGE(TAG, "Failed to mount filesystem.");
+    } else {
+        ESP_LOGE(TAG, "Failed to initialize the card (%s).", esp_err_to_name(ret));
+    }
+    return ret;
 }
 
 // =============================================================================
