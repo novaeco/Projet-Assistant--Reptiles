@@ -7,28 +7,61 @@
 #include "esp_netif.h"
 #include "esp_sntp.h"
 #include "esp_http_client.h"
+#include "esp_timer.h"
 #include <string.h>
 
 static const char *TAG = "NET";
 static bool is_connected = false;
+static bool has_credentials = false;
+static esp_timer_handle_t s_wifi_retry_timer = NULL;
+static uint32_t s_wifi_backoff_ms = 1000; // start at 1s
+
+static void wifi_retry_cb(void *arg)
+{
+    (void)arg;
+    ESP_LOGI(TAG, "Wi-Fi reconnect attempt (backoff %ums)", s_wifi_backoff_ms);
+    esp_wifi_connect();
+}
+
+static void schedule_wifi_retry(uint32_t delay_ms)
+{
+    if (!has_credentials) {
+        ESP_LOGW(TAG, "Wi-Fi credentials not set, waiting...");
+        return;
+    }
+
+    if (!s_wifi_retry_timer) {
+        const esp_timer_create_args_t tmr_args = {
+            .callback = wifi_retry_cb,
+            .name = "wifi_retry"
+        };
+        ESP_ERROR_CHECK(esp_timer_create(&tmr_args, &s_wifi_retry_timer));
+    }
+
+    ESP_ERROR_CHECK(esp_timer_stop(s_wifi_retry_timer));
+    ESP_ERROR_CHECK(esp_timer_start_once(s_wifi_retry_timer, delay_ms * 1000ULL));
+}
 
 static void event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data)
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        ESP_LOGI(TAG, "Wi-Fi STA start, attempting initial connect");
-        esp_wifi_connect();
+        ESP_LOGI(TAG, "Wi-Fi STA start");
+        schedule_wifi_retry(10); // tiny delay to allow config to settle
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         is_connected = false;
         net_server_stop(); // Stop server on disconnect
         wifi_event_sta_disconnected_t *disc = (wifi_event_sta_disconnected_t *)event_data;
-        ESP_LOGW(TAG, "Wi-Fi disconnected (reason=%d). Retrying...", disc ? disc->reason : -1);
-        esp_wifi_connect();
+        ESP_LOGW(TAG, "Wi-Fi disconnected (reason=%d).", disc ? disc->reason : -1);
+        // Exponential backoff capped at 60s
+        s_wifi_backoff_ms = s_wifi_backoff_ms < 60000 ? s_wifi_backoff_ms * 2 : 60000;
+        schedule_wifi_retry(s_wifi_backoff_ms);
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
         ESP_LOGI(TAG, "Got IP: " IPSTR " (netmask=" IPSTR ", gw=" IPSTR ")",
                  IP2STR(&event->ip_info.ip), IP2STR(&event->ip_info.netmask), IP2STR(&event->ip_info.gw));
         is_connected = true;
+        s_wifi_backoff_ms = 1000; // reset backoff after success
         wifi_ap_record_t ap_info = {0};
         if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
             ESP_LOGI(TAG, "Connected SSID=%s RSSI=%d dBm", (char *)ap_info.ssid, ap_info.rssi);
@@ -77,11 +110,13 @@ esp_err_t net_connect(const char *ssid, const char *password)
     wifi_config_t wifi_config = {0};
     strncpy((char*)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid));
     strncpy((char*)wifi_config.sta.password, password, sizeof(wifi_config.sta.password));
-    
+
     ESP_LOGI(TAG, "Connecting to %s...", ssid);
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_connect());
-    
+    has_credentials = true;
+    s_wifi_backoff_ms = 1000;
+    schedule_wifi_retry(10);
+
     return ESP_OK;
 }
 
