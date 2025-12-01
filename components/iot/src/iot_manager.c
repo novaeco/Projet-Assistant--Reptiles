@@ -4,9 +4,12 @@
 #ifdef CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
 #include "esp_crt_bundle.h"
 #endif
+#include "esp_event.h"
 #include "esp_log.h"
+#include "esp_netif.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
 #include "cJSON.h"
 #include "core_service.h"
 #include "net_manager.h"
@@ -69,31 +72,48 @@ static void mqtt_schedule_start(uint32_t delay_ms)
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
 {
     (void)event_data;
-    if (base == MQTT_EVENTS) {
-        switch ((esp_mqtt_event_id_t)event_id) {
-        case MQTT_EVENT_CONNECTED:
-            ESP_LOGI(TAG, "MQTT Connected");
-            mqtt_started = true;
-            s_mqtt_backoff_ms = 1000;
-            iot_mqtt_publish_stats();
-            break;
-        case MQTT_EVENT_DISCONNECTED:
-            ESP_LOGI(TAG, "MQTT Disconnected");
-            mqtt_started = false;
-            s_mqtt_backoff_ms = s_mqtt_backoff_ms < 60000 ? s_mqtt_backoff_ms * 2 : 60000;
-            mqtt_schedule_start(s_mqtt_backoff_ms);
-            break;
-        case MQTT_EVENT_ERROR:
-            ESP_LOGI(TAG, "MQTT Error");
-            break;
-        default:
-            break;
-        }
-    } else if (base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+    (void)handler_args;
+    (void)base;
+
+    switch ((esp_mqtt_event_id_t)event_id) {
+    case MQTT_EVENT_CONNECTED:
+        ESP_LOGI(TAG, "MQTT Connected");
+        mqtt_started = true;
+        s_mqtt_backoff_ms = 1000;
+        iot_mqtt_publish_stats();
+        break;
+    case MQTT_EVENT_DISCONNECTED:
+        ESP_LOGI(TAG, "MQTT Disconnected");
+        mqtt_started = false;
+        s_mqtt_backoff_ms = s_mqtt_backoff_ms < 60000 ? s_mqtt_backoff_ms * 2 : 60000;
+        mqtt_schedule_start(s_mqtt_backoff_ms);
+        break;
+    case MQTT_EVENT_ERROR:
+        ESP_LOGI(TAG, "MQTT Error");
+        break;
+    default:
+        break;
+    }
+}
+
+static void ip_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
+{
+    (void)handler_args;
+    (void)event_data;
+
+    if (base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ESP_LOGI(TAG, "MQTT notified of IP acquisition, starting client");
         s_mqtt_backoff_ms = 1000;
         mqtt_schedule_start(10);
-    } else if (base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+    }
+}
+
+static void wifi_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
+{
+    (void)handler_args;
+    (void)event_data;
+
+    if (base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         if (mqtt_started && mqtt_client) {
             ESP_LOGI(TAG, "Stopping MQTT due to Wi-Fi disconnect");
             esp_mqtt_client_stop(mqtt_client);
@@ -115,8 +135,8 @@ esp_err_t iot_init(void)
     ESP_LOGI(TAG, "MQTT client configured for %s (waiting for IP)", MQTT_BROKER_URI);
 
     // Gate MQTT start on IP acquisition
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, mqtt_event_handler, NULL, NULL));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, mqtt_event_handler, NULL, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, ip_event_handler, NULL, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, wifi_event_handler, NULL, NULL));
 
     // Start once network is up
     mqtt_schedule_start(10);
