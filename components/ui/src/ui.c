@@ -25,6 +25,7 @@ static lv_display_t *s_disp = NULL;
 static lv_indev_t *s_indev = NULL;
 static esp_lcd_panel_handle_t s_panel_handle = NULL;
 static esp_lcd_touch_handle_t s_touch_handle = NULL;
+static int64_t s_flush_deadline_us = 0;
 
 // =============================================================================
 // Flush Callback (Display)
@@ -58,10 +59,10 @@ static void ui_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_m
     int y2 = area->y2 + 1;
 
     esp_lcd_panel_draw_bitmap(s_panel_handle, x1, y1, x2, y2, px_map);
-    if (s_use_vsync) {
-        s_vsync_fired = false;
-    }
+    s_vsync_fired = false;
     s_flush_waiting = true;
+    // Set a safety deadline in case VSYNC never triggers (avoid WDT lockup)
+    s_flush_deadline_us = esp_timer_get_time() + 20000; // 20ms deadline
 
     // If vsync callback registration failed, complete immediately
     if (!s_use_vsync) {
@@ -116,13 +117,18 @@ static void ui_task(void *arg)
     while (1) {
         uint32_t time_till_next = lv_timer_handler();
 
-        if (s_use_vsync && s_flush_waiting && s_vsync_fired) {
-            s_vsync_fired = false;
-            s_flush_waiting = false;
-            lv_display_flush_ready(s_disp);
+        if (s_flush_waiting) {
+            bool vsync_ok = s_use_vsync && s_vsync_fired;
+            bool timeout = esp_timer_get_time() >= s_flush_deadline_us;
+            if (vsync_ok || timeout) {
+                s_vsync_fired = false;
+                s_flush_waiting = false;
+                lv_display_flush_ready(s_disp);
+            }
         }
 
-        vTaskDelay(pdMS_TO_TICKS(time_till_next > 10 ? time_till_next : 10));
+        uint32_t sleep_ms = time_till_next > 5 ? time_till_next : 5;
+        vTaskDelay(pdMS_TO_TICKS(sleep_ms));
     }
 }
 

@@ -162,13 +162,13 @@ static esp_err_t board_io_expander_init(void)
 
     // Default outputs high for inactive CS / released resets / power enables
     s_io_state = 0;
-    ESP_ERROR_CHECK(io_expander_set_output(IO_EXP_PIN_LCD_VDD, true));
-    ESP_ERROR_CHECK(io_expander_set_output(IO_EXP_PIN_BK, true));
+    ESP_ERROR_CHECK(io_expander_set_output(IO_EXP_PIN_LCD_VDD, true)); // LCD_VDD_EN high (power up panel rails)
+    ESP_ERROR_CHECK(io_expander_set_output(IO_EXP_PIN_BK, true));      // Backlight enable gate high
     ESP_ERROR_CHECK(io_expander_set_output(IO_EXP_PIN_TOUCH_RST, true));
-    ESP_ERROR_CHECK(io_expander_set_output(IO_EXP_PIN_SD_CS, true));
-    ESP_ERROR_CHECK(io_expander_set_output(IO_EXP_PIN_CAN_USB, false));
+    ESP_ERROR_CHECK(io_expander_set_output(IO_EXP_PIN_SD_CS, true));   // SD CS inactive (active low)
+    ESP_ERROR_CHECK(io_expander_set_output(IO_EXP_PIN_CAN_USB, false));// Keep USB bridge selected by default
     ESP_ERROR_CHECK(io_expander_apply_outputs());
-    ESP_LOGI(TAG, "EXIO configured (CH422G): LCD_VDD_EN=1, BK_EN=1, TP_RST=1, SD_CS=1");
+    ESP_LOGI(TAG, "EXIO configured (CH422G): LCD_VDD_EN=1, BK_EN=1, TP_RST=1, SD_CS=1 (Waveshare 7B pinout)");
 
     // Allow panel power to settle before reset sequence
     vTaskDelay(pdMS_TO_TICKS(10));
@@ -190,13 +190,18 @@ static esp_err_t board_io_expander_init(void)
 
 static esp_err_t board_lcd_init(void)
 {
-    ESP_LOGI(TAG, "Initializing RGB LCD Panel %ux%u @ %.2f MHz", BOARD_LCD_H_RES, BOARD_LCD_V_RES,
+    ESP_LOGI(TAG, "Initializing RGB LCD Panel %ux%u @ %.2f MHz (Waveshare 7B)", BOARD_LCD_H_RES, BOARD_LCD_V_RES,
              (double)BOARD_LCD_PIXEL_CLOCK_HZ / 1e6);
     ESP_LOGI(TAG,
              "LCD timing (hsync bp/fp/pw=%u/%u/%u, vsync bp/fp/pw=%u/%u/%u) disp=%d pclk=%d vsync=%d hsync=%d de=%d",
              152, 48, 162,
              13, 3, 45,
              BOARD_LCD_DISP, BOARD_LCD_PCLK, BOARD_LCD_VSYNC, BOARD_LCD_HSYNC, BOARD_LCD_DE);
+    ESP_LOGI(TAG,
+             "LCD data pins: R0-4=%d,%d,%d,%d,%d G0-5=%d,%d,%d,%d,%d,%d B0-4=%d,%d,%d,%d,%d",
+             BOARD_LCD_DATA_R0, BOARD_LCD_DATA_R1, BOARD_LCD_DATA_R2, BOARD_LCD_DATA_R3, BOARD_LCD_DATA_R4,
+             BOARD_LCD_DATA_G0, BOARD_LCD_DATA_G1, BOARD_LCD_DATA_G2, BOARD_LCD_DATA_G3, BOARD_LCD_DATA_G4, BOARD_LCD_DATA_G5,
+             BOARD_LCD_DATA_B0, BOARD_LCD_DATA_B1, BOARD_LCD_DATA_B2, BOARD_LCD_DATA_B3, BOARD_LCD_DATA_B4);
 
     esp_lcd_rgb_panel_config_t panel_config = {
         .data_width = 16, // RGB565
@@ -317,9 +322,9 @@ esp_err_t board_mount_sdcard(void)
         .allocation_unit_size = 16 * 1024
     };
 
-    ESP_LOGI(TAG, "Initializing SD Card via SPI...");
+    ESP_LOGI(TAG, "Initializing SD Card via SPI (Waveshare 7B, CS via CH422G)...");
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    host.max_freq_khz = 1000; // start slow, will be increased once stable
+    host.max_freq_khz = 400; // start slow, will be increased once stable
 
     spi_bus_config_t bus_cfg = {
         .mosi_io_num = BOARD_SD_MOSI,
@@ -359,12 +364,14 @@ esp_err_t board_mount_sdcard(void)
     board_delay_for_sd();
 
     // Retry a few times with progressive frequency to cope with slow cards
-    static const int freq_table_khz[] = {1000, 5000, 20000};
+    static const int freq_table_khz[] = {400, 1000, 5000, 20000};
     const size_t max_attempts = sizeof(freq_table_khz) / sizeof(freq_table_khz[0]);
 
     for (size_t attempt = 0; attempt < max_attempts; ++attempt) {
         host.max_freq_khz = freq_table_khz[attempt];
-        ESP_LOGI(TAG, "SD attempt %d/%d @ %dkHz", (int)(attempt + 1), (int)max_attempts, host.max_freq_khz);
+        ESP_LOGI(TAG, "SD attempt %d/%d @ %dkHz (MISO=%d MOSI=%d SCLK=%d CS=EXIO%u)",
+                 (int)(attempt + 1), (int)max_attempts, host.max_freq_khz,
+                 BOARD_SD_MISO, BOARD_SD_MOSI, BOARD_SD_CLK, IO_EXP_PIN_SD_CS);
 
         // Toggle CS high between attempts
         io_expander_sd_cs(false);
@@ -385,6 +392,7 @@ esp_err_t board_mount_sdcard(void)
     } else {
         ESP_LOGE(TAG, "Failed to initialize the card (%s).", esp_err_to_name(ret));
     }
+    ESP_LOGW(TAG, "SD disabled, continuing without /sdcard (insert card and retry later)");
     return ret;
 }
 
