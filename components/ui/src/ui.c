@@ -12,6 +12,7 @@
 #include "esp_lcd_panel_rgb.h"
 #include "esp_lcd_touch.h"
 #include "reptile_storage.h"
+#include "esp_heap_caps.h"
 
 static const char *TAG = "UI";
 
@@ -140,9 +141,12 @@ esp_err_t ui_init(void)
     void *buf1 = NULL;
     void *buf2 = NULL;
     ESP_ERROR_CHECK(esp_lcd_rgb_panel_get_frame_buffer(s_panel_handle, 2, &buf1, &buf2));
-    
+
     // Use Direct Mode: LVGL renders directly into the frame buffer that is not active.
     lv_display_set_buffers(s_disp, buf1, buf2, BOARD_LCD_H_RES * BOARD_LCD_V_RES * sizeof(uint16_t), LV_DISPLAY_RENDER_MODE_DIRECT);
+    ESP_LOGI(TAG, "LVGL direct mode buffers: buf1=%p (%s), buf2=%p (%s)",
+             buf1, esp_ptr_external_ram(buf1) ? "PSRAM" : "internal",
+             buf2, esp_ptr_external_ram(buf2) ? "PSRAM" : "internal");
 
     // 6. Create Input Device (Touch)
     if (s_touch_handle) {

@@ -46,7 +46,11 @@ esp_err_t iot_init(void)
     if (!mqtt_client) return ESP_FAIL;
 
     esp_mqtt_client_register_event(mqtt_client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
-    return esp_mqtt_client_start(mqtt_client);
+    esp_err_t err = esp_mqtt_client_start(mqtt_client);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "MQTT client started (%s)", MQTT_BROKER_URI);
+    }
+    return err;
 }
 
 void iot_mqtt_publish_stats(void)

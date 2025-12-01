@@ -15,6 +15,10 @@ idf.py build
 idf.py -p /dev/ttyUSB0 flash monitor
 ```
 
+## Tests rapides
+- `idf.py fullclean build`
+- `idf.py -p COMx flash monitor`
+
 ## Points matériels
 - Écran RGB 1024×600 : fréquence PCLK fixée à 27 MHz pour une stabilité conforme aux spécifications Waveshare.
 - Tactile GT911 (I2C) : géré via `esp_lcd_touch_gt911`.
