@@ -19,7 +19,7 @@ void iot_mqtt_publish_stats(void);
 
 /**
  * @brief Start Over-The-Air firmware update.
- * 
+ *
  * @param url URL of the binary file (http/https).
  * @return esp_err_t
  */
