@@ -251,7 +251,7 @@ static void board_i2c_scan(i2c_master_bus_handle_t bus)
     char ack_buf[256] = {0};
     size_t ack_len = 0;
     int found = 0;
-    const TickType_t timeout_ticks = pdMS_TO_TICKS(80);
+    const TickType_t timeout_ticks = pdMS_TO_TICKS(150);
 
     for (uint8_t addr = 0x08; addr <= 0x77; ++addr) {
         if (i2c_master_probe(bus, addr, timeout_ticks) == ESP_OK) {
@@ -299,7 +299,7 @@ static esp_err_t board_i2c_selftest(void)
     esp_log_level_set("i2c.master", ESP_LOG_WARN);
 
     for (size_t i = 0; i < sizeof(expected) / sizeof(expected[0]); ++i) {
-        esp_err_t err = i2c_master_probe(s_i2c_bus_handle, expected[i].addr, pdMS_TO_TICKS(100));
+        esp_err_t err = i2c_master_probe(s_i2c_bus_handle, expected[i].addr, pdMS_TO_TICKS(150));
         if (err == ESP_OK) {
             ++ack;
             expected[i].detected = true;
@@ -452,7 +452,7 @@ static esp_err_t board_ioexp_init_ch422(void)
 static esp_err_t board_ioexp_init_waveshare(void)
 {
     const uint8_t addr = 0x24;
-    esp_err_t probe = i2c_master_probe(s_i2c_bus_handle, addr, pdMS_TO_TICKS(120));
+    esp_err_t probe = i2c_master_probe(s_i2c_bus_handle, addr, pdMS_TO_TICKS(150));
     if (probe != ESP_OK) {
         ESP_LOGW(TAG_IO, "Waveshare IO extension did not ACK at 0x%02X: %s", addr, esp_err_to_name(probe));
         return probe;
@@ -705,7 +705,7 @@ static esp_err_t gt911_detect_i2c_addr(uint8_t *addr_out, bool can_reset)
                  int_level ? "HIGH" : "LOW");
         for (size_t i = 0; i < sizeof(candidates); ++i) {
             uint8_t addr = candidates[i];
-            esp_err_t probe = i2c_master_probe(s_i2c_bus_handle, addr, pdMS_TO_TICKS(100));
+            esp_err_t probe = i2c_master_probe(s_i2c_bus_handle, addr, pdMS_TO_TICKS(150));
             if (probe == ESP_OK) {
                 *addr_out = addr;
                 detected = true;
@@ -780,12 +780,26 @@ esp_err_t board_mount_sdcard(void)
     board_delay_for_sd();
 
     bool spi_bus_initialized = false;
-    const spi_bus_config_t *bus_cfg_ptr = &bus_cfg;
+    bool spi_bus_owned = false;
+
+    esp_err_t bus_err = spi_bus_initialize(BOARD_SD_SPI_HOST, &bus_cfg, SDSPI_DEFAULT_DMA);
+    if (bus_err == ESP_OK) {
+        spi_bus_initialized = true;
+        spi_bus_owned = true;
+        ESP_LOGI(TAG_SD, "SPI bus initialized for SDSPI host %d", BOARD_SD_SPI_HOST);
+    } else if (bus_err == ESP_ERR_INVALID_STATE) {
+        spi_bus_initialized = true;
+        spi_bus_owned = false;
+        ESP_LOGW(TAG_SD, "SPI bus for host %d already initialized, reusing", BOARD_SD_SPI_HOST);
+    } else {
+        ESP_LOGE(TAG_SD, "SPI bus init failed: %s", esp_err_to_name(bus_err));
+        return bus_err;
+    }
 
     for (size_t attempt = 0; attempt < max_attempts; ++attempt) {
         sdspi_ioext_config_t ioext_cfg = {
             .spi_host = BOARD_SD_SPI_HOST,
-            .bus_cfg = bus_cfg_ptr,
+            .bus_cfg = NULL, // bus already initialized once above
             .slot_config = slot_config,
             .max_freq_khz = freq_table_khz[attempt],
             .set_cs_cb = io_expander_sd_cs,
@@ -801,9 +815,6 @@ esp_err_t board_mount_sdcard(void)
             ESP_LOGW(TAG_SD, "SD host init failed @%dkHz: %s", freq_table_khz[attempt], esp_err_to_name(ret));
             continue;
         }
-
-        spi_bus_initialized = true;
-        bus_cfg_ptr = NULL; // Keep the bus alive across retries without reinitializing
 
         ESP_LOGI(TAG_SD, "SD attempt %d/%d @ %dkHz (MISO=%d MOSI=%d SCLK=%d CS=EXIO%u)",
                  (int)(attempt + 1), (int)max_attempts, freq_table_khz[attempt],
@@ -829,7 +840,7 @@ esp_err_t board_mount_sdcard(void)
         ESP_LOGE(TAG_SD, "Failed to initialize the card (%s).", esp_err_to_name(ret));
     }
     if (spi_bus_initialized) {
-        sdspi_ioext_host_deinit(s_sdspi_handle, BOARD_SD_SPI_HOST, true);
+        sdspi_ioext_host_deinit(s_sdspi_handle, BOARD_SD_SPI_HOST, spi_bus_owned);
         s_sdspi_handle = 0;
         io_expander_sd_cs(false, cs_ctx);
     }
