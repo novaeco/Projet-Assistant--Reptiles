@@ -32,10 +32,7 @@ static esp_lcd_panel_handle_t s_lcd_panel_handle = NULL;
 static esp_lcd_touch_handle_t s_touch_handle = NULL;
 static sdmmc_card_t *s_card = NULL;
 static i2c_master_bus_handle_t s_i2c_bus_handle = NULL;
-static i2c_master_dev_handle_t s_io_dev_mode = NULL;
-static i2c_master_dev_handle_t s_io_dev_in = NULL;
-static i2c_master_dev_handle_t s_io_dev_out_low = NULL;
-static i2c_master_dev_handle_t s_io_dev_out_high = NULL;
+static i2c_master_dev_handle_t s_io_dev = NULL;
 static bool s_board_has_expander = false;
 static bool s_board_has_lcd = false;
 static uint16_t s_io_state = 0;
@@ -174,10 +171,11 @@ static esp_err_t sdspi_transaction_with_expander(sdspi_dev_handle_t handle, sdmm
 #define IO_EXP_PIN_CAN_USB   5
 #define IO_EXP_PIN_LCD_VDD   6
 
-#define CH422_ADDR_MODE      0x24
-#define CH422_ADDR_INPUT     0x26
-#define CH422_ADDR_OUT_LOW   0x38
-#define CH422_ADDR_OUT_HIGH  0x23
+#define CH422_ADDR           0x24
+#define CH422_CMD_SYS_PARAM  0x00  // System parameter byte (IO extension, outputs enabled)
+#define CH422_CMD_IO_OUTPUT  0x70  // Write IO7..IO0 output levels
+#define CH422_CMD_OC_OUTPUT  0x46  // Open-collector outputs (not used on this board)
+#define CH422_CMD_IO_INPUT   0x4D  // Read IO7..IO0 inputs
 
 // =============================================================================
 // I2C & IO Expander
@@ -214,7 +212,7 @@ static void board_i2c_scan(void)
         return;
     }
 
-    const uint8_t probes[] = {CH422_ADDR_MODE, CH422_ADDR_INPUT, CH422_ADDR_OUT_LOW, CH422_ADDR_OUT_HIGH, 0x5D, 0x14};
+    const uint8_t probes[] = {CH422_ADDR, 0x5D, 0x14};
     int found = 0;
     int missing = 0;
 
@@ -234,23 +232,23 @@ static void board_i2c_scan(void)
     ESP_LOGI(TAG_I2C, "I2C probe summary: found=%d missing=%d", found, missing);
 }
 
-static esp_err_t ch422_add_device(uint8_t address, const char *label, i2c_master_dev_handle_t *out)
+static esp_err_t ch422_add_device(void)
 {
     i2c_device_config_t dev_cfg = {
-        .device_address = address,
+        .device_address = CH422_ADDR,
         .scl_speed_hz = BOARD_I2C_FREQ_HZ,
     };
-    esp_err_t err = i2c_master_bus_add_device(s_i2c_bus_handle, &dev_cfg, out);
+    esp_err_t err = i2c_master_bus_add_device(s_i2c_bus_handle, &dev_cfg, &s_io_dev);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG_CH422, "%s add failed (0x%02X): %s", label, address, esp_err_to_name(err));
+        ESP_LOGE(TAG_CH422, "CH422 add failed (0x%02X): %s", CH422_ADDR, esp_err_to_name(err));
     }
     return err;
 }
 
-static esp_err_t ch422_write_byte(i2c_master_dev_handle_t dev, uint8_t value, const char *label)
+static esp_err_t ch422_send_cmd(const uint8_t *payload, size_t len, const char *label)
 {
-    ESP_RETURN_ON_FALSE(dev, ESP_ERR_INVALID_STATE, TAG_CH422, "%s handle not ready", label);
-    esp_err_t err = i2c_master_transmit(dev, &value, 1, pdMS_TO_TICKS(200));
+    ESP_RETURN_ON_FALSE(s_io_dev, ESP_ERR_INVALID_STATE, TAG_CH422, "%s handle not ready", label);
+    esp_err_t err = i2c_master_transmit(s_io_dev, payload, len, pdMS_TO_TICKS(200));
     if (err != ESP_OK) {
         ESP_LOGE(TAG_CH422, "%s write failed: %s", label, esp_err_to_name(err));
         return err;
@@ -258,12 +256,13 @@ static esp_err_t ch422_write_byte(i2c_master_dev_handle_t dev, uint8_t value, co
     return ESP_OK;
 }
 
-static esp_err_t ch422_read_byte(i2c_master_dev_handle_t dev, uint8_t *value, const char *label)
+static esp_err_t ch422_read_inputs(uint8_t *value)
 {
-    ESP_RETURN_ON_FALSE(dev, ESP_ERR_INVALID_STATE, TAG_CH422, "%s handle not ready", label);
-    esp_err_t err = i2c_master_receive(dev, value, 1, pdMS_TO_TICKS(200));
+    ESP_RETURN_ON_FALSE(s_io_dev, ESP_ERR_INVALID_STATE, TAG_CH422, "CH422 IN handle not ready");
+    uint8_t cmd = CH422_CMD_IO_INPUT;
+    esp_err_t err = i2c_master_transmit_receive(s_io_dev, &cmd, 1, value, 1, pdMS_TO_TICKS(200));
     if (err != ESP_OK) {
-        ESP_LOGE(TAG_CH422, "%s read failed: %s", label, esp_err_to_name(err));
+        ESP_LOGE(TAG_CH422, "CH422 IO_IN read failed: %s", esp_err_to_name(err));
         return err;
     }
     return ESP_OK;
@@ -271,11 +270,11 @@ static esp_err_t ch422_read_byte(i2c_master_dev_handle_t dev, uint8_t *value, co
 
 static esp_err_t io_expander_apply_outputs(void)
 {
-    uint8_t low = (uint8_t)(s_io_state & 0xFF);
-    uint8_t high = (uint8_t)((s_io_state >> 8) & 0x0F);
-
-    ESP_RETURN_ON_ERROR(ch422_write_byte(s_io_dev_out_low, low, "CH422 OUT0-7"), TAG_CH422, "Write OUT0-7 failed");
-    return ch422_write_byte(s_io_dev_out_high, (uint8_t)(high | 0xF0), "CH422 OUT8-11");
+    uint8_t out = (uint8_t)(s_io_state & 0xFF);
+    uint8_t payload[2] = {CH422_CMD_IO_OUTPUT, out};
+    ESP_RETURN_ON_ERROR(ch422_send_cmd(payload, sizeof(payload), "CH422 IO_OUT"), TAG_CH422,
+                        "Write IO_OUT failed");
+    return ESP_OK;
 }
 
 static esp_err_t io_expander_set_output(uint8_t pin, bool level)
@@ -295,14 +294,11 @@ static esp_err_t io_expander_set_output(uint8_t pin, bool level)
 
 static esp_err_t io_expander_set_pwm(uint8_t duty)
 {
-    // CH422G does not expose a dedicated PWM data register on the Waveshare design.
-    // Keep the API for compatibility and log for traceability.
-    static bool s_warned = false;
-    if (!s_warned) {
-        ESP_LOGW(TAG_CH422, "PWM request duty=%u ignored (not supported by current mapping)", duty);
-        s_warned = true;
+    // CH422G lacks hardware PWM; use digital on/off as a pragmatic fallback.
+    if (!s_board_has_expander) {
+        return ESP_ERR_INVALID_STATE;
     }
-    return ESP_OK;
+    return io_expander_set_output(IO_EXP_PIN_BK, duty != 0);
 }
 
 static esp_err_t io_expander_sd_cs(bool assert)
@@ -321,18 +317,11 @@ static esp_err_t board_io_expander_init(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    ESP_RETURN_ON_ERROR(ch422_add_device(CH422_ADDR_MODE, "CH422 MODE", &s_io_dev_mode), TAG_CH422,
-                        "CH422 MODE add failed");
-    ESP_RETURN_ON_ERROR(ch422_add_device(CH422_ADDR_INPUT, "CH422 IN", &s_io_dev_in), TAG_CH422,
-                        "CH422 IN add failed");
-    ESP_RETURN_ON_ERROR(ch422_add_device(CH422_ADDR_OUT_LOW, "CH422 OUT0-7", &s_io_dev_out_low), TAG_CH422,
-                        "CH422 OUT0-7 add failed");
-    ESP_RETURN_ON_ERROR(ch422_add_device(CH422_ADDR_OUT_HIGH, "CH422 OUT8-11", &s_io_dev_out_high), TAG_CH422,
-                        "CH422 OUT8-11 add failed");
+    ESP_RETURN_ON_ERROR(ch422_add_device(), TAG_CH422, "CH422 add failed");
 
-    // Configure direction: IO0-IO6 outputs, IO7 left as input (battery sense)
-    ESP_RETURN_ON_ERROR(ch422_write_byte(s_io_dev_mode, 0x7F, "CH422 MODE"), TAG_CH422,
-                        "CH422 direction config failed");
+    // Configure System Parameter byte for IO extension + push-pull outputs (datasheet: SYS=0x7F expected by board)
+    uint8_t sys_param = CH422_CMD_SYS_PARAM | 0x7F;
+    ESP_RETURN_ON_ERROR(ch422_send_cmd(&sys_param, 1, "CH422 SYS_PARAM"), TAG_CH422, "CH422 SYS_PARAM failed");
 
     // Default outputs high for inactive CS / released resets / power enables
     s_io_state = 0;
@@ -342,7 +331,8 @@ static esp_err_t board_io_expander_init(void)
     ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_SD_CS, true), TAG_CH422, "CH422 SD_CS set failed");
     ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_CAN_USB, false), TAG_CH422, "CH422 CAN/USB mux set failed");
     ESP_RETURN_ON_ERROR(io_expander_apply_outputs(), TAG_CH422, "CH422 outputs apply failed");
-    ESP_LOGI(TAG_CH422, "EXIO configured: LCD_VDD_EN=1 BK_EN=1 TP_RST=1 SD_CS=1 (Waveshare 7B)");
+    s_board_has_expander = true;
+    ESP_LOGI(TAG_CH422, "CH422G init OK, IO_OUT=0x%02X", (uint8_t)(s_io_state & 0xFF));
 
     // Allow panel power to settle before reset sequence
     vTaskDelay(pdMS_TO_TICKS(10));
@@ -355,7 +345,6 @@ static esp_err_t board_io_expander_init(void)
     // Turn on backlight fully via digital enable
     ESP_RETURN_ON_ERROR(io_expander_set_pwm(0xFF), TAG_CH422, "CH422 PWM init failed");
 
-    s_board_has_expander = true;
     return ESP_OK;
 }
 
@@ -756,7 +745,7 @@ esp_err_t board_io_expander_read_inputs(uint8_t *inputs)
         return ESP_ERR_INVALID_STATE;
     }
 
-    return ch422_read_byte(s_io_dev_in, inputs, "CH422 IN");
+    return ch422_read_inputs(inputs);
 }
 
 esp_err_t board_battery_set_calibration(uint8_t raw_empty, uint8_t raw_full)
