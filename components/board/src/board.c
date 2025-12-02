@@ -179,20 +179,19 @@ static bool board_touch_fetch(uint16_t *x, uint16_t *y, uint8_t *count_out)
     }
 
     uint8_t count = 0;
-    esp_lcd_touch_read_data(s_touch_handle);
-
-    bool pressed = false;
+    esp_lcd_touch_point_data_t point[1] = {0};
     esp_err_t err = ESP_OK;
 
-    if (esp_lcd_touch_get_data) {
-        err = esp_lcd_touch_get_data(s_touch_handle, x, y, NULL, &count, 1);
-        pressed = (err == ESP_OK && count > 0);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG_TOUCH, "esp_lcd_touch_get_data failed: %s", esp_err_to_name(err));
-        }
-    } else {
-        pressed = esp_lcd_touch_get_coordinates(s_touch_handle, x, y, NULL, &count, 1);
-        err = pressed ? ESP_OK : ESP_FAIL;
+    esp_lcd_touch_read_data(s_touch_handle);
+    err = esp_lcd_touch_get_data(s_touch_handle, point, &count, 1);
+
+    bool pressed = (err == ESP_OK && count > 0);
+    if (pressed) {
+        *x = point[0].x;
+        *y = point[0].y;
+    }
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG_TOUCH, "esp_lcd_touch_get_data failed: %s", esp_err_to_name(err));
     }
 
     if (count_out) {
@@ -893,7 +892,7 @@ esp_err_t board_mount_sdcard(void)
     esp_err_t ret = ESP_FAIL;
 
     // Ensure CS idles high before the first clock train
-    io_expander_sd_cs(false);
+    io_expander_sd_cs(false, NULL);
     board_delay_for_sd();
 
     for (size_t attempt = 0; attempt < max_attempts; ++attempt) {
@@ -901,6 +900,7 @@ esp_err_t board_mount_sdcard(void)
             .spi_host = BOARD_SD_SPI_HOST,
             .bus_cfg = &bus_cfg,
             .slot_config = slot_config,
+            .max_freq_khz = freq_table_khz[attempt],
             .set_cs_cb = io_expander_sd_cs,
             .cs_user_ctx = NULL,
             .cs_setup_delay_us = 5,
@@ -909,7 +909,6 @@ esp_err_t board_mount_sdcard(void)
         };
 
         sdmmc_host_t host = {0};
-        host.max_freq_khz = freq_table_khz[attempt];
         ret = sdspi_ioext_host_init(&ioext_cfg, &host, &s_sdspi_handle);
         if (ret != ESP_OK) {
             ESP_LOGW(TAG_SD, "SD host init failed @%dkHz: %s", freq_table_khz[attempt], esp_err_to_name(ret));
@@ -930,7 +929,7 @@ esp_err_t board_mount_sdcard(void)
         ESP_LOGW(TAG_SD, "SD mount failed (attempt %d): %s", attempt + 1, esp_err_to_name(ret));
         sdspi_ioext_host_deinit(s_sdspi_handle, BOARD_SD_SPI_HOST, false);
         s_sdspi_handle = 0;
-        io_expander_sd_cs(false);
+        io_expander_sd_cs(false, NULL);
         board_delay_for_sd();
     }
 

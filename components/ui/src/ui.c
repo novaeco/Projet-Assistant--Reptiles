@@ -84,12 +84,12 @@ static void ui_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
 
         esp_lcd_touch_read_data(s_touch_handle);
         bool pressed = false;
-        esp_err_t err = ESP_OK;
-        if (esp_lcd_touch_get_data) {
-            err = esp_lcd_touch_get_data(s_touch_handle, touch_x, touch_y, NULL, &touch_cnt, 1);
-            pressed = (err == ESP_OK && touch_cnt > 0);
-        } else {
-            pressed = esp_lcd_touch_get_coordinates(s_touch_handle, touch_x, touch_y, NULL, &touch_cnt, 1);
+        esp_lcd_touch_point_data_t point[1] = {0};
+        esp_err_t err = esp_lcd_touch_get_data(s_touch_handle, point, &touch_cnt, 1);
+        if (err == ESP_OK && touch_cnt > 0) {
+            touch_x[0] = point[0].x;
+            touch_y[0] = point[0].y;
+            pressed = true;
         }
 
         if (pressed && touch_cnt > 0) {

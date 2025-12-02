@@ -14,6 +14,7 @@ typedef struct {
     spi_host_device_t spi_host;
     const spi_bus_config_t *bus_cfg;
     sdspi_device_config_t slot_config;
+    uint32_t max_freq_khz;
     sdspi_ioext_cs_cb_t set_cs_cb;
     void *cs_user_ctx;
     uint32_t cs_setup_delay_us;
