@@ -123,7 +123,7 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t
 
     *host_out = host;
     *device_out = device;
-    return ESP_OK;
+    return err;
 }
 
 esp_err_t sdspi_ioext_host_deinit(sdspi_dev_handle_t device, spi_host_device_t spi_host, bool free_bus)
