@@ -70,6 +70,7 @@ static esp_err_t board_i2c_recover_bus(void);
 static esp_err_t board_i2c_selftest(void);
 static esp_err_t ch422_probe(ch422_probe_result_t *result);
 static void ch422_log_probe_result(const ch422_probe_result_t *result);
+static void *board_get_io_cs_ctx(void);
 
 static esp_err_t board_load_battery_calibration(void)
 {
@@ -168,7 +169,7 @@ static esp_err_t board_i2c_recover_bus(void)
 }
 
 static esp_err_t io_expander_sd_cs(bool assert, void *ctx);
-static void board_i2c_scan(void);
+static void board_i2c_scan(i2c_master_bus_handle_t bus);
 static esp_err_t gt911_detect_i2c_addr(uint8_t *addr_out, bool can_reset);
 static bool board_touch_fetch(uint16_t *x, uint16_t *y, uint8_t *count_out);
 
@@ -198,6 +199,18 @@ static bool board_touch_fetch(uint16_t *x, uint16_t *y, uint8_t *count_out)
         *count_out = count;
     }
     return pressed;
+}
+
+static void *board_get_io_cs_ctx(void)
+{
+    switch (s_io_driver) {
+    case IO_DRIVER_WAVESHARE:
+        return s_io_ws;
+    case IO_DRIVER_CH422:
+        return s_io_dev;
+    default:
+        return NULL;
+    }
 }
 
 #define IO_EXP_PIN_TOUCH_RST 1
@@ -304,38 +317,44 @@ static esp_err_t board_i2c_init(void)
     ESP_RETURN_ON_ERROR(i2c_new_master_bus(&bus_config, &s_i2c_bus_handle), TAG_I2C, "I2C bus create failed");
     vTaskDelay(pdMS_TO_TICKS(100));
     ESP_RETURN_ON_ERROR(board_i2c_selftest(), TAG_I2C, "I2C selftest failed");
-    board_i2c_scan();
+
+    board_i2c_scan(s_i2c_bus_handle);
     return ESP_OK;
 }
 
-static void board_i2c_scan(void)
+static void board_i2c_scan(i2c_master_bus_handle_t bus)
 {
-    if (!s_i2c_bus_handle) {
+    if (!bus) {
         ESP_LOGW(TAG_I2C, "I2C scan skipped: bus handle not ready");
         return;
     }
 
-    const uint8_t expected[] = {0x24, 0x5D, 0x14};
-    int found = 0;
-
     esp_log_level_t prev_level = esp_log_level_get("i2c.master");
     esp_log_level_set("i2c.master", ESP_LOG_WARN);
 
-    ESP_LOGI(TAG_I2C, "Probing I2C endpoints (0x24/0x5D/0x14) @ %d Hz...", BOARD_I2C_FREQ_HZ);
-    for (size_t i = 0; i < sizeof(expected); ++i) {
-        esp_err_t err = i2c_master_probe(s_i2c_bus_handle, expected[i], pdMS_TO_TICKS(60));
-        if (err == ESP_OK) {
+    ESP_LOGI(TAG_I2C, "Scanning I2C bus for devices (0x08..0x77) @ %d Hz...", BOARD_I2C_FREQ_HZ);
+
+    char ack_buf[256] = {0};
+    size_t ack_len = 0;
+    int found = 0;
+    const TickType_t timeout_ticks = pdMS_TO_TICKS(30);
+
+    for (uint8_t addr = 0x08; addr <= 0x77; ++addr) {
+        if (i2c_master_probe(bus, addr, timeout_ticks) == ESP_OK) {
             ++found;
+            int written = snprintf(&ack_buf[ack_len], sizeof(ack_buf) - ack_len, "%s0x%02X",
+                                   ack_len == 0 ? "" : ", ", addr);
+            if (written > 0 && ack_len + (size_t)written < sizeof(ack_buf)) {
+                ack_len += (size_t)written;
+            }
         }
     }
-    ESP_LOGI(TAG_I2C, "I2C targeted probe complete: %d/%d responded", found, (int)(sizeof(expected)));
 
-#ifdef CONFIG_BOARD_I2C_FULL_SCAN_DEBUG
-    ESP_LOGW(TAG_I2C, "Debug full scan enabled (may log timeouts)");
-    for (uint8_t addr = 0x03; addr <= 0x77; ++addr) {
-        i2c_master_probe(s_i2c_bus_handle, addr, pdMS_TO_TICKS(10));
+    if (found > 0) {
+        ESP_LOGI(TAG_I2C, "I2C scan ACK (%d device%s): %s", found, found > 1 ? "s" : "", ack_buf);
+    } else {
+        ESP_LOGW(TAG_I2C, "I2C scan: no devices responded");
     }
-#endif
 
     esp_log_level_set("i2c.master", prev_level);
 }
@@ -891,8 +910,10 @@ esp_err_t board_mount_sdcard(void)
     const size_t max_attempts = sizeof(freq_table_khz) / sizeof(freq_table_khz[0]);
     esp_err_t ret = ESP_FAIL;
 
+    void *cs_ctx = board_get_io_cs_ctx();
+
     // Ensure CS idles high before the first clock train
-    io_expander_sd_cs(false, NULL);
+    io_expander_sd_cs(false, cs_ctx);
     board_delay_for_sd();
 
     for (size_t attempt = 0; attempt < max_attempts; ++attempt) {
@@ -902,7 +923,7 @@ esp_err_t board_mount_sdcard(void)
             .slot_config = slot_config,
             .max_freq_khz = freq_table_khz[attempt],
             .set_cs_cb = io_expander_sd_cs,
-            .cs_user_ctx = NULL,
+            .cs_user_ctx = cs_ctx,
             .cs_setup_delay_us = 5,
             .cs_hold_delay_us = 5,
             .initial_clocks = 80,
@@ -929,7 +950,7 @@ esp_err_t board_mount_sdcard(void)
         ESP_LOGW(TAG_SD, "SD mount failed (attempt %d): %s", attempt + 1, esp_err_to_name(ret));
         sdspi_ioext_host_deinit(s_sdspi_handle, BOARD_SD_SPI_HOST, false);
         s_sdspi_handle = 0;
-        io_expander_sd_cs(false, NULL);
+        io_expander_sd_cs(false, cs_ctx);
         board_delay_for_sd();
     }
 
