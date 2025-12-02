@@ -26,9 +26,6 @@
 #include "io_extension_waveshare.h"
 #include "sdspi_ioext_host.h"
 
-esp_err_t esp_lcd_touch_get_data(esp_lcd_touch_handle_t tp, uint16_t *x, uint16_t *y, uint16_t *strength,
-                                 uint8_t *point_num, uint8_t max_point_num) __attribute__((weak));
-
 static const char *TAG = "BOARD";
 static const char *TAG_I2C = "BOARD_I2C";
 static const char *TAG_CH422 = "CH422G";
@@ -170,7 +167,7 @@ static esp_err_t board_i2c_recover_bus(void)
     return ESP_FAIL;
 }
 
-static esp_err_t io_expander_sd_cs(bool assert);
+static esp_err_t io_expander_sd_cs(bool assert, void *ctx);
 static void board_i2c_scan(void);
 static esp_err_t gt911_detect_i2c_addr(uint8_t *addr_out, bool can_reset);
 static bool board_touch_fetch(uint16_t *x, uint16_t *y, uint8_t *count_out);
@@ -360,9 +357,9 @@ static esp_err_t board_i2c_selftest(void)
         const char *label;
         bool detected;
     } expected[] = {
-        {0x24, "IO EXT"},
-        {0x5D, "GT911 (alt1)"},
-        {0x14, "GT911 (alt2)"},
+        {0x24, "IO EXT", false},
+        {0x5D, "GT911 (alt1)", false},
+        {0x14, "GT911 (alt2)", false},
     };
 
     int ack = 0;
@@ -514,8 +511,9 @@ static esp_err_t io_expander_set_pwm(uint8_t duty)
     }
 }
 
-static esp_err_t io_expander_sd_cs(bool assert)
+static esp_err_t io_expander_sd_cs(bool assert, void *ctx)
 {
+    (void)ctx;
     // Active-low CS: pull low to select
     return io_expander_set_output(IO_EXP_PIN_SD_CS, !assert);
 }
@@ -899,12 +897,11 @@ esp_err_t board_mount_sdcard(void)
     board_delay_for_sd();
 
     for (size_t attempt = 0; attempt < max_attempts; ++attempt) {
-        slot_config.clock_speed_hz = freq_table_khz[attempt] * 1000;
         sdspi_ioext_config_t ioext_cfg = {
             .spi_host = BOARD_SD_SPI_HOST,
             .bus_cfg = &bus_cfg,
             .slot_config = slot_config,
-            .set_cs_cb = (sdspi_ioext_cs_cb_t)io_expander_sd_cs,
+            .set_cs_cb = io_expander_sd_cs,
             .cs_user_ctx = NULL,
             .cs_setup_delay_us = 5,
             .cs_hold_delay_us = 5,
@@ -912,6 +909,7 @@ esp_err_t board_mount_sdcard(void)
         };
 
         sdmmc_host_t host = {0};
+        host.max_freq_khz = freq_table_khz[attempt];
         ret = sdspi_ioext_host_init(&ioext_cfg, &host, &s_sdspi_handle);
         if (ret != ESP_OK) {
             ESP_LOGW(TAG_SD, "SD host init failed @%dkHz: %s", freq_table_khz[attempt], esp_err_to_name(ret));
@@ -931,7 +929,7 @@ esp_err_t board_mount_sdcard(void)
 
         ESP_LOGW(TAG_SD, "SD mount failed (attempt %d): %s", attempt + 1, esp_err_to_name(ret));
         sdspi_ioext_host_deinit(s_sdspi_handle, BOARD_SD_SPI_HOST, false);
-        s_sdspi_handle = NULL;
+        s_sdspi_handle = 0;
         io_expander_sd_cs(false);
         board_delay_for_sd();
     }
