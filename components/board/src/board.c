@@ -222,11 +222,12 @@ static esp_err_t board_i2c_init(void)
         .clk_source = I2C_CLK_SRC_DEFAULT,
         .glitch_ignore_cnt = 7,
         .flags.enable_internal_pullup = CONFIG_BOARD_I2C_ENABLE_INTERNAL_PULLUP,
-        .trans_queue_depth = 16,
+        .trans_queue_depth = 0, // Force synchronous transfers (async queue depth must be 0 for probe)
     };
 
-    ESP_LOGI(TAG_I2C, "Initializing I2C bus (SDA=%d SCL=%d @ %d Hz, internal PU=%s, queue=%u)...", BOARD_I2C_SDA, BOARD_I2C_SCL,
-             BOARD_I2C_FREQ_HZ, CONFIG_BOARD_I2C_ENABLE_INTERNAL_PULLUP ? "on" : "off", (unsigned)bus_config.trans_queue_depth);
+    ESP_LOGI(TAG_I2C, "Initializing I2C bus (SDA=%d SCL=%d @ %d Hz, internal PU=%s, queue=%u sync)...", BOARD_I2C_SDA,
+             BOARD_I2C_SCL, BOARD_I2C_FREQ_HZ, CONFIG_BOARD_I2C_ENABLE_INTERNAL_PULLUP ? "on" : "off",
+             (unsigned)bus_config.trans_queue_depth);
     ESP_RETURN_ON_ERROR(i2c_new_master_bus(&bus_config, &s_i2c_bus_handle), TAG_I2C, "I2C bus create failed");
     vTaskDelay(pdMS_TO_TICKS(100));
     ESP_RETURN_ON_ERROR(board_i2c_selftest(), TAG_I2C, "I2C selftest failed");
@@ -250,7 +251,7 @@ static void board_i2c_scan(i2c_master_bus_handle_t bus)
     char ack_buf[256] = {0};
     size_t ack_len = 0;
     int found = 0;
-    const TickType_t timeout_ticks = pdMS_TO_TICKS(30);
+    const TickType_t timeout_ticks = pdMS_TO_TICKS(80);
 
     for (uint8_t addr = 0x08; addr <= 0x77; ++addr) {
         if (i2c_master_probe(bus, addr, timeout_ticks) == ESP_OK) {
@@ -298,7 +299,7 @@ static esp_err_t board_i2c_selftest(void)
     esp_log_level_set("i2c.master", ESP_LOG_WARN);
 
     for (size_t i = 0; i < sizeof(expected) / sizeof(expected[0]); ++i) {
-        esp_err_t err = i2c_master_probe(s_i2c_bus_handle, expected[i].addr, pdMS_TO_TICKS(120));
+        esp_err_t err = i2c_master_probe(s_i2c_bus_handle, expected[i].addr, pdMS_TO_TICKS(100));
         if (err == ESP_OK) {
             ++ack;
             expected[i].detected = true;
@@ -666,7 +667,7 @@ static esp_err_t gt911_detect_i2c_addr(uint8_t *addr_out, bool can_reset)
 
     int max_attempts = can_reset ? 2 : 1;
     for (int attempt = 0; attempt < max_attempts && !detected; ++attempt) {
-        bool int_level = (attempt == 0);
+        bool int_level = (attempt == 0) ? false : true;
         gpio_config_t int_cfg = {
             .pin_bit_mask = BIT64(BOARD_TOUCH_INT),
             .mode = can_reset ? GPIO_MODE_OUTPUT : GPIO_MODE_INPUT,
@@ -679,6 +680,8 @@ static esp_err_t gt911_detect_i2c_addr(uint8_t *addr_out, bool can_reset)
         if (can_reset) {
             ESP_RETURN_ON_ERROR(gpio_set_level(BOARD_TOUCH_INT, int_level), TAG_TOUCH, "GT911 INT drive failed");
 
+            ESP_LOGI(TAG_TOUCH, "GT911 reset attempt %d: drive INT %s, toggling TP_RST via IO expander", attempt + 1,
+                     int_level ? "HIGH" : "LOW");
             ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_TOUCH_RST, false), TAG_TOUCH, "GT911 reset low failed");
             vTaskDelay(pdMS_TO_TICKS(10));
             ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_TOUCH_RST, true), TAG_TOUCH, "GT911 reset high failed");
@@ -687,14 +690,26 @@ static esp_err_t gt911_detect_i2c_addr(uint8_t *addr_out, bool can_reset)
             ESP_LOGW(TAG_TOUCH, "GT911 reset skipped: IO expander unavailable, probing passive state");
         }
 
-        ESP_LOGI(TAG_TOUCH, "GT911 detect attempt %d: TP_IRQ=%d, probing 0x5D/0x14", attempt + 1, int_level);
+        // Release INT so GT911 can drive it after address selection phase
+        gpio_config_t int_input_cfg = {
+            .pin_bit_mask = BIT64(BOARD_TOUCH_INT),
+            .mode = GPIO_MODE_INPUT,
+            .pull_up_en = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        ESP_RETURN_ON_ERROR(gpio_config(&int_input_cfg), TAG_TOUCH, "GT911 INT restore to input failed (attempt %d)", attempt + 1);
+        vTaskDelay(pdMS_TO_TICKS(5));
+
+        ESP_LOGI(TAG_TOUCH, "GT911 detect attempt %d: INT %s during reset, probing 0x5D/0x14", attempt + 1,
+                 int_level ? "HIGH" : "LOW");
         for (size_t i = 0; i < sizeof(candidates); ++i) {
             uint8_t addr = candidates[i];
-            esp_err_t probe = i2c_master_probe(s_i2c_bus_handle, addr, pdMS_TO_TICKS(200));
+            esp_err_t probe = i2c_master_probe(s_i2c_bus_handle, addr, pdMS_TO_TICKS(100));
             if (probe == ESP_OK) {
                 *addr_out = addr;
                 detected = true;
-                ESP_LOGI(TAG_TOUCH, "GT911 acknowledged at 0x%02X with TP_IRQ=%d", addr, int_level);
+                ESP_LOGI(TAG_TOUCH, "GT911 acknowledged at 0x%02X after INT %s reset", addr, int_level ? "HIGH" : "LOW");
                 break;
             }
         }
@@ -764,10 +779,13 @@ esp_err_t board_mount_sdcard(void)
     io_expander_sd_cs(false, cs_ctx);
     board_delay_for_sd();
 
+    bool spi_bus_initialized = false;
+    const spi_bus_config_t *bus_cfg_ptr = &bus_cfg;
+
     for (size_t attempt = 0; attempt < max_attempts; ++attempt) {
         sdspi_ioext_config_t ioext_cfg = {
             .spi_host = BOARD_SD_SPI_HOST,
-            .bus_cfg = &bus_cfg,
+            .bus_cfg = bus_cfg_ptr,
             .slot_config = slot_config,
             .max_freq_khz = freq_table_khz[attempt],
             .set_cs_cb = io_expander_sd_cs,
@@ -783,6 +801,9 @@ esp_err_t board_mount_sdcard(void)
             ESP_LOGW(TAG_SD, "SD host init failed @%dkHz: %s", freq_table_khz[attempt], esp_err_to_name(ret));
             continue;
         }
+
+        spi_bus_initialized = true;
+        bus_cfg_ptr = NULL; // Keep the bus alive across retries without reinitializing
 
         ESP_LOGI(TAG_SD, "SD attempt %d/%d @ %dkHz (MISO=%d MOSI=%d SCLK=%d CS=EXIO%u)",
                  (int)(attempt + 1), (int)max_attempts, freq_table_khz[attempt],
@@ -806,6 +827,11 @@ esp_err_t board_mount_sdcard(void)
         ESP_LOGE(TAG_SD, "Failed to mount filesystem.");
     } else {
         ESP_LOGE(TAG_SD, "Failed to initialize the card (%s).", esp_err_to_name(ret));
+    }
+    if (spi_bus_initialized) {
+        sdspi_ioext_host_deinit(s_sdspi_handle, BOARD_SD_SPI_HOST, true);
+        s_sdspi_handle = 0;
+        io_expander_sd_cs(false, cs_ctx);
     }
     ESP_LOGW(TAG_SD, "SD disabled, continuing without /sdcard (insert card and retry later)");
     return ret;
