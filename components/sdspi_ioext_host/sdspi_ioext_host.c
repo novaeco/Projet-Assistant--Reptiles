@@ -79,12 +79,17 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t
     ESP_RETURN_ON_FALSE(config->set_cs_cb, ESP_ERR_INVALID_ARG, TAG, "missing CS callback");
 
     spi_host_device_t spi_host = config->spi_host;
+    esp_err_t err = ESP_OK;
 
     if (config->bus_cfg) {
-        esp_err_t err = spi_bus_initialize(spi_host, config->bus_cfg, SDSPI_DEFAULT_DMA);
+        err = spi_bus_initialize(spi_host, config->bus_cfg, SDSPI_DEFAULT_DMA);
         if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
             ESP_LOGE(TAG, "SPI bus init failed: %s", esp_err_to_name(err));
             return err;
+        }
+        if (err == ESP_ERR_INVALID_STATE) {
+            ESP_LOGW(TAG, "SPI bus already initialized, reusing existing host %d", spi_host);
+            err = ESP_OK;
         }
     }
 
