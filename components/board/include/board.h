@@ -33,6 +33,26 @@ esp_lcd_panel_handle_t board_get_lcd_handle(void);
 esp_lcd_touch_handle_t board_get_touch_handle(void);
 
 /**
+ * @brief Check if the IO expander (CH422G) was successfully initialized.
+ */
+bool board_has_io_expander(void);
+
+/**
+ * @brief Check if the GT911 touch driver is ready.
+ */
+bool board_touch_is_ready(void);
+
+/**
+ * @brief Check if the SD card is mounted.
+ */
+bool board_sd_is_mounted(void);
+
+/**
+ * @brief Check if the RGB LCD panel is initialized.
+ */
+bool board_lcd_is_ready(void);
+
+/**
  * @brief Mount the SD card to /sdcard
  *
  * @return esp_err_t ESP_OK on success
