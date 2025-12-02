@@ -23,8 +23,10 @@
 #include "reptile_storage.h"
 #include "esp_rom_sys.h"
 #include "esp_system.h"
+#include "board_io_map.h"
 #include "io_extension_waveshare.h"
 #include "sdspi_ioext_host.h"
+#include "ch422g.h"
 
 static const char *TAG = "BOARD";
 static const char *TAG_I2C = "BOARD_I2C";
@@ -37,11 +39,10 @@ static esp_lcd_panel_handle_t s_lcd_panel_handle = NULL;
 static esp_lcd_touch_handle_t s_touch_handle = NULL;
 static sdmmc_card_t *s_card = NULL;
 static i2c_master_bus_handle_t s_i2c_bus_handle = NULL;
-static i2c_master_dev_handle_t s_io_dev = NULL;
 static io_extension_ws_handle_t s_io_ws = NULL;
+static ch422g_handle_t s_ch422 = NULL;
 static bool s_board_has_expander = false;
 static bool s_board_has_lcd = false;
-static uint16_t s_io_state = 0;
 static sdspi_dev_handle_t s_sdspi_handle = 0;
 static uint8_t s_batt_raw_empty = CONFIG_BOARD_BATTERY_RAW_EMPTY;
 static uint8_t s_batt_raw_full = CONFIG_BOARD_BATTERY_RAW_FULL;
@@ -56,20 +57,9 @@ typedef enum {
 
 static io_driver_kind_t s_io_driver = IO_DRIVER_NONE;
 
-typedef struct {
-    bool mode_ack;
-    bool input_ack;
-    bool out_low_ack;
-    bool out_high_ack;
-    int ack_count;
-    int expected_count;
-} ch422_probe_result_t;
-
 static void board_log_i2c_levels(const char *stage);
 static esp_err_t board_i2c_recover_bus(void);
 static esp_err_t board_i2c_selftest(void);
-static esp_err_t ch422_probe(ch422_probe_result_t *result);
-static void ch422_log_probe_result(const ch422_probe_result_t *result);
 static void *board_get_io_cs_ctx(void);
 
 static esp_err_t board_load_battery_calibration(void)
@@ -207,93 +197,15 @@ static void *board_get_io_cs_ctx(void)
     case IO_DRIVER_WAVESHARE:
         return s_io_ws;
     case IO_DRIVER_CH422:
-        return s_io_dev;
+        return s_ch422;
     default:
         return NULL;
     }
 }
 
-#define IO_EXP_PIN_TOUCH_RST 1
-#define IO_EXP_PIN_BK        2
-#define IO_EXP_PIN_LCD_RST   3
-#define IO_EXP_PIN_SD_CS     4
-#define IO_EXP_PIN_CAN_USB   5
-#define IO_EXP_PIN_LCD_VDD   6
-
-#define CH422_ADDR           0x24
-#define CH422_CMD_SYS_PARAM  0x00  // System parameter byte (IO extension, outputs enabled)
-#define CH422_CMD_IO_OUTPUT  0x70  // Write IO7..IO0 output levels
-#define CH422_CMD_OC_OUTPUT  0x46  // Open-collector outputs (not used on this board)
-#define CH422_CMD_IO_INPUT   0x4D  // Read IO7..IO0 inputs
-
 // =============================================================================
 // I2C & IO Expander
 // =============================================================================
-
-static esp_err_t ch422_probe(ch422_probe_result_t *result)
-{
-    if (!result) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    memset(result, 0, sizeof(*result));
-    const struct {
-        uint8_t addr;
-        bool *flag;
-    } expected[] = {
-        {CH422_ADDR, &result->mode_ack},
-        {0x26, &result->input_ack},
-        {0x38, &result->out_low_ack},
-        {0x23, &result->out_high_ack},
-    };
-
-    result->expected_count = (int)(sizeof(expected) / sizeof(expected[0]));
-
-    for (size_t i = 0; i < sizeof(expected) / sizeof(expected[0]); ++i) {
-        esp_err_t err = i2c_master_probe(s_i2c_bus_handle, expected[i].addr, pdMS_TO_TICKS(50));
-        if (err == ESP_OK) {
-            ++result->ack_count;
-            *(expected[i].flag) = true;
-        }
-    }
-
-    if (!result->mode_ack) {
-        return ESP_ERR_NOT_FOUND;
-    }
-
-    if (result->ack_count < result->expected_count) {
-        return ESP_ERR_INVALID_RESPONSE;
-    }
-
-    return ESP_OK;
-}
-
-static void ch422_log_probe_result(const ch422_probe_result_t *result)
-{
-    if (!result) {
-        return;
-    }
-
-    if (result->ack_count == 0) {
-        ESP_LOGE(TAG_CH422, "CH422G not detected: no ACK on expected addresses (0x23/0x24/0x26/0x38)");
-        ESP_LOGW(TAG_CH422, "Check IO expander power, I2C pull-ups, and reset wiring.");
-        return;
-    }
-
-    ESP_LOGI(TAG_CH422, "CH422G probe: MODE=%s INPUT=%s OUT_LOW=%s OUT_HIGH=%s (ack %d/%d)",
-             result->mode_ack ? "ACK" : "NACK",
-             result->input_ack ? "ACK" : "NACK",
-             result->out_low_ack ? "ACK" : "NACK",
-             result->out_high_ack ? "ACK" : "NACK",
-             result->ack_count, result->expected_count);
-
-    if (!result->mode_ack) {
-        ESP_LOGE(TAG_CH422, "CH422G MODE register not responding at 0x24");
-    }
-    if (result->mode_ack && result->ack_count < result->expected_count) {
-        ESP_LOGW(TAG_CH422, "CH422G partially detected (missing registers). Output control may be unavailable.");
-    }
-}
 
 static esp_err_t board_i2c_init(void)
 {
@@ -310,10 +222,11 @@ static esp_err_t board_i2c_init(void)
         .clk_source = I2C_CLK_SRC_DEFAULT,
         .glitch_ignore_cnt = 7,
         .flags.enable_internal_pullup = CONFIG_BOARD_I2C_ENABLE_INTERNAL_PULLUP,
+        .trans_queue_depth = 16,
     };
 
-    ESP_LOGI(TAG_I2C, "Initializing I2C bus (SDA=%d SCL=%d @ %d Hz, internal PU=%s)...", BOARD_I2C_SDA, BOARD_I2C_SCL,
-             BOARD_I2C_FREQ_HZ, CONFIG_BOARD_I2C_ENABLE_INTERNAL_PULLUP ? "on" : "off");
+    ESP_LOGI(TAG_I2C, "Initializing I2C bus (SDA=%d SCL=%d @ %d Hz, internal PU=%s, queue=%u)...", BOARD_I2C_SDA, BOARD_I2C_SCL,
+             BOARD_I2C_FREQ_HZ, CONFIG_BOARD_I2C_ENABLE_INTERNAL_PULLUP ? "on" : "off", (unsigned)bus_config.trans_queue_depth);
     ESP_RETURN_ON_ERROR(i2c_new_master_bus(&bus_config, &s_i2c_bus_handle), TAG_I2C, "I2C bus create failed");
     vTaskDelay(pdMS_TO_TICKS(100));
     ESP_RETURN_ON_ERROR(board_i2c_selftest(), TAG_I2C, "I2C selftest failed");
@@ -375,7 +288,7 @@ static esp_err_t board_i2c_selftest(void)
         const char *label;
         bool detected;
     } expected[] = {
-        {0x24, "IO EXT", false},
+        {BOARD_IO_EXP_ADDR, "IO EXT", false},
         {0x5D, "GT911 (alt1)", false},
         {0x14, "GT911 (alt2)", false},
     };
@@ -385,7 +298,7 @@ static esp_err_t board_i2c_selftest(void)
     esp_log_level_set("i2c.master", ESP_LOG_WARN);
 
     for (size_t i = 0; i < sizeof(expected) / sizeof(expected[0]); ++i) {
-        esp_err_t err = i2c_master_probe(s_i2c_bus_handle, expected[i].addr, pdMS_TO_TICKS(60));
+        esp_err_t err = i2c_master_probe(s_i2c_bus_handle, expected[i].addr, pdMS_TO_TICKS(120));
         if (err == ESP_OK) {
             ++ack;
             expected[i].detected = true;
@@ -416,99 +329,28 @@ static esp_err_t board_i2c_selftest(void)
     return ESP_OK;
 }
 
-static esp_err_t ch422_add_device(void)
+static uint16_t io_expander_cached_state(void)
 {
-    i2c_device_config_t dev_cfg = {
-        .device_address = CH422_ADDR,
-        .scl_speed_hz = BOARD_I2C_FREQ_HZ,
-    };
-    esp_err_t err = i2c_master_bus_add_device(s_i2c_bus_handle, &dev_cfg, &s_io_dev);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG_CH422, "CH422 add failed (0x%02X): %s", CH422_ADDR, esp_err_to_name(err));
+    switch (s_io_driver) {
+    case IO_DRIVER_WAVESHARE:
+        return 0; // The Waveshare backend keeps its own state
+    case IO_DRIVER_CH422:
+        return ch422g_get_cached_outputs(s_ch422);
+    default:
+        return 0;
     }
-    return err;
-}
-
-static void ch422_release_handle(void)
-{
-    if (s_io_dev) {
-        i2c_master_bus_rm_device(s_io_dev);
-        s_io_dev = NULL;
-    }
-}
-
-static esp_err_t ch422_send_cmd(const uint8_t *payload, size_t len, const char *label)
-{
-    ESP_RETURN_ON_FALSE(s_io_dev, ESP_ERR_INVALID_STATE, TAG_CH422, "%s handle not ready", label);
-    const int attempts = 3;
-    esp_err_t err = ESP_FAIL;
-
-    for (int attempt = 1; attempt <= attempts; ++attempt) {
-        err = i2c_master_transmit(s_io_dev, payload, len, pdMS_TO_TICKS(100));
-        if (err == ESP_OK) {
-            break;
-        }
-
-        if (attempt < attempts) {
-            ESP_LOGW(TAG_CH422, "%s write failed (attempt %d/%d): %s", label, attempt, attempts, esp_err_to_name(err));
-            vTaskDelay(pdMS_TO_TICKS(20 * attempt));
-        } else {
-            ESP_LOGE(TAG_CH422, "%s write failed after %d attempts: %s", label, attempts, esp_err_to_name(err));
-        }
-    }
-    return err;
-}
-
-static esp_err_t ch422_read_inputs(uint8_t *value)
-{
-    ESP_RETURN_ON_FALSE(s_io_dev, ESP_ERR_INVALID_STATE, TAG_CH422, "CH422 IN handle not ready");
-    uint8_t cmd = CH422_CMD_IO_INPUT;
-    const int attempts = 3;
-    esp_err_t err = ESP_FAIL;
-
-    for (int attempt = 1; attempt <= attempts; ++attempt) {
-        err = i2c_master_transmit_receive(s_io_dev, &cmd, 1, value, 1, pdMS_TO_TICKS(100));
-        if (err == ESP_OK) {
-            break;
-        }
-        if (attempt < attempts) {
-            ESP_LOGW(TAG_CH422, "CH422 IO_IN read failed (attempt %d/%d): %s", attempt, attempts, esp_err_to_name(err));
-            vTaskDelay(pdMS_TO_TICKS(20 * attempt));
-        } else {
-            ESP_LOGE(TAG_CH422, "CH422 IO_IN read failed after %d attempts: %s", attempts, esp_err_to_name(err));
-        }
-    }
-    return err;
-}
-
-static esp_err_t io_expander_apply_outputs(void)
-{
-    if (s_io_driver != IO_DRIVER_CH422) {
-        return ESP_OK;
-    }
-    uint8_t out = (uint8_t)(s_io_state & 0xFF);
-    uint8_t payload[2] = {CH422_CMD_IO_OUTPUT, out};
-    ESP_RETURN_ON_ERROR(ch422_send_cmd(payload, sizeof(payload), "CH422 IO_OUT"), TAG_CH422,
-                        "Write IO_OUT failed");
-    return ESP_OK;
 }
 
 static esp_err_t io_expander_set_output(uint8_t pin, bool level)
 {
+    if (!s_board_has_expander) {
+        return ESP_ERR_INVALID_STATE;
+    }
     switch (s_io_driver) {
     case IO_DRIVER_WAVESHARE:
         return io_extension_ws_set_output(s_io_ws, pin, level);
     case IO_DRIVER_CH422:
-        if (pin >= 12) {
-            ESP_LOGE(TAG_CH422, "Invalid CH422 pin %u", pin);
-            return ESP_ERR_INVALID_ARG;
-        }
-        if (level) {
-            s_io_state |= (1U << pin);
-        } else {
-            s_io_state &= ~(1U << pin);
-        }
-        return io_expander_apply_outputs();
+        return ch422g_set_output_level(s_ch422, pin, level);
     default:
         return ESP_ERR_INVALID_STATE;
     }
@@ -531,9 +373,19 @@ static esp_err_t io_expander_set_pwm(uint8_t duty)
 
 static esp_err_t io_expander_sd_cs(bool assert, void *ctx)
 {
-    (void)ctx;
-    // Active-low CS: pull low to select
-    return io_expander_set_output(IO_EXP_PIN_SD_CS, !assert);
+    if (!ctx) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    bool level = !assert; // Active-low CS
+    if (ctx == s_io_ws && s_io_driver == IO_DRIVER_WAVESHARE) {
+        return io_extension_ws_set_output(s_io_ws, IO_EXP_PIN_SD_CS, level);
+    }
+    if (ctx == s_ch422 && s_io_driver == IO_DRIVER_CH422) {
+        return ch422g_set_output_level(s_ch422, IO_EXP_PIN_SD_CS, level);
+    }
+
+    return io_expander_set_output(IO_EXP_PIN_SD_CS, level);
 }
 
 static esp_err_t board_io_expander_post_init_defaults(void)
@@ -543,62 +395,57 @@ static esp_err_t board_io_expander_post_init_defaults(void)
     ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_TOUCH_RST, true), TAG_IO, "TP_RST default high failed");
     ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_SD_CS, true), TAG_IO, "SD CS idle high failed");
     ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_CAN_USB, false), TAG_IO, "CAN/USB default failed");
+    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_RST, false), TAG_IO, "LCD_RST low failed");
+    vTaskDelay(pdMS_TO_TICKS(5));
+    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_RST, true), TAG_IO, "LCD_RST high failed");
+    vTaskDelay(pdMS_TO_TICKS(10));
+    ESP_RETURN_ON_ERROR(io_expander_set_pwm(100), TAG_IO, "PWM init failed");
 
-    if (s_io_driver == IO_DRIVER_CH422) {
-        ESP_RETURN_ON_ERROR(io_expander_apply_outputs(), TAG_CH422, "apply outputs failed");
-        ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_RST, false), TAG_CH422, "LCD_RST low failed");
-        vTaskDelay(pdMS_TO_TICKS(5));
-        ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_RST, true), TAG_CH422, "LCD_RST high failed");
-        vTaskDelay(pdMS_TO_TICKS(10));
-        ESP_RETURN_ON_ERROR(io_expander_set_pwm(100), TAG_CH422, "PWM init failed");
-    } else if (s_io_driver == IO_DRIVER_WAVESHARE) {
-        ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_RST, false), TAG_IO, "LCD_RST low failed");
-        vTaskDelay(pdMS_TO_TICKS(5));
-        ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_RST, true), TAG_IO, "LCD_RST high failed");
-        vTaskDelay(pdMS_TO_TICKS(10));
-        ESP_RETURN_ON_ERROR(io_expander_set_pwm(100), TAG_IO, "PWM init failed");
-    }
+    uint16_t cached = io_expander_cached_state();
+    ESP_LOGI(TAG_IO, "IO expander defaults applied (state=0x%04X)", (unsigned)cached);
     return ESP_OK;
 }
 
 static esp_err_t board_ioexp_init_ch422(void)
 {
     const int attempts = 3;
-    esp_err_t probe_err = ESP_FAIL;
-    ch422_probe_result_t probe = {0};
+    esp_err_t err = ESP_FAIL;
+    ch422g_config_t cfg = {
+        .bus = s_i2c_bus_handle,
+        .address = BOARD_IO_EXP_ADDR,
+        .scl_speed_hz = BOARD_I2C_FREQ_HZ,
+    };
+
     for (int attempt = 1; attempt <= attempts; ++attempt) {
-        probe_err = ch422_probe(&probe);
-        ch422_log_probe_result(&probe);
-        if (probe_err == ESP_OK) {
+        err = ch422g_init(&cfg, &s_ch422);
+        if (err == ESP_OK) {
             break;
         }
-        if (attempt < attempts) {
-            ESP_LOGW(TAG_CH422, "CH422G probe failed (attempt %d/%d): %s", attempt, attempts, esp_err_to_name(probe_err));
-            vTaskDelay(pdMS_TO_TICKS(20 * attempt));
-        }
+        ESP_LOGW(TAG_CH422, "CH422G init attempt %d/%d failed: %s", attempt, attempts, esp_err_to_name(err));
+        vTaskDelay(pdMS_TO_TICKS(25 * attempt));
     }
 
-    if (probe_err != ESP_OK) {
-        return probe_err;
+    if (err != ESP_OK) {
+        return err;
     }
 
-    esp_err_t add_err = ch422_add_device();
-    if (add_err != ESP_OK) {
-        return add_err;
-    }
-
-    uint8_t sys_param = CH422_CMD_SYS_PARAM | 0x7F;
-    esp_err_t sys_err = ch422_send_cmd(&sys_param, 1, "CH422 SYS_PARAM");
-    if (sys_err != ESP_OK) {
-        ch422_release_handle();
-        return sys_err;
+    uint8_t sys_param = 0;
+    err = ch422g_read_reg(s_ch422, 0x00, &sys_param);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG_CH422, "CH422G SYS_PARAM=0x%02X", sys_param);
     }
 
     s_io_driver = IO_DRIVER_CH422;
     s_board_has_expander = true;
-    s_io_state = 0;
-    ESP_LOGI(TAG_CH422, "CH422G init OK, applying defaults");
-    return board_io_expander_post_init_defaults();
+    ESP_LOGI(TAG_CH422, "CH422G init OK at 0x%02X, applying defaults", cfg.address);
+    err = board_io_expander_post_init_defaults();
+    if (err != ESP_OK) {
+        ch422g_deinit(s_ch422);
+        s_ch422 = NULL;
+        s_board_has_expander = false;
+        s_io_driver = IO_DRIVER_NONE;
+    }
+    return err;
 }
 
 static esp_err_t board_ioexp_init_waveshare(void)
@@ -642,6 +489,7 @@ static esp_err_t board_io_expander_init(void)
     s_board_has_expander = false;
     s_io_driver = IO_DRIVER_NONE;
     s_io_ws = NULL;
+    s_ch422 = NULL;
 
     if (!s_i2c_bus_handle) {
         ESP_LOGE(TAG_IO, "I2C bus not ready for IO expander");
@@ -1023,6 +871,12 @@ esp_err_t board_init(void)
     }
 #endif
 
+    ESP_LOGI(TAG, "Board features enabled: expander=%d sd=%d touch=%d lcd=%d",
+             s_board_has_expander ? 1 : 0,
+             board_sd_is_mounted() ? 1 : 0,
+             board_touch_is_ready() ? 1 : 0,
+             board_lcd_is_ready() ? 1 : 0);
+
     return status;
 }
 
@@ -1061,7 +915,7 @@ esp_err_t board_io_expander_read_inputs(uint8_t *inputs)
     case IO_DRIVER_WAVESHARE:
         return io_extension_ws_read_inputs(s_io_ws, inputs);
     case IO_DRIVER_CH422:
-        return ch422_read_inputs(inputs);
+        return ch422g_read_inputs(s_ch422, inputs);
     default:
         return ESP_ERR_INVALID_STATE;
     }
