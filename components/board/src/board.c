@@ -24,6 +24,10 @@
 #include "esp_rom_sys.h"
 #include "esp_system.h"
 #include "io_extension_waveshare.h"
+#include "sdspi_ioext_host.h"
+
+esp_err_t esp_lcd_touch_get_data(esp_lcd_touch_handle_t tp, uint16_t *x, uint16_t *y, uint16_t *strength,
+                                 uint8_t *point_num, uint8_t max_point_num) __attribute__((weak));
 
 static const char *TAG = "BOARD";
 static const char *TAG_I2C = "BOARD_I2C";
@@ -44,7 +48,6 @@ static uint16_t s_io_state = 0;
 static sdspi_dev_handle_t s_sdspi_handle = 0;
 static uint8_t s_batt_raw_empty = CONFIG_BOARD_BATTERY_RAW_EMPTY;
 static uint8_t s_batt_raw_full = CONFIG_BOARD_BATTERY_RAW_FULL;
-static bool s_sd_diag_hold_cs_low = false;
 static bool s_logged_expander_absent = false;
 static bool s_logged_batt_unavailable = false;
 
@@ -170,23 +173,35 @@ static esp_err_t board_i2c_recover_bus(void)
 static esp_err_t io_expander_sd_cs(bool assert);
 static void board_i2c_scan(void);
 static esp_err_t gt911_detect_i2c_addr(uint8_t *addr_out, bool can_reset);
+static bool board_touch_fetch(uint16_t *x, uint16_t *y, uint8_t *count_out);
 
-static esp_err_t sdspi_transaction_with_expander(sdspi_dev_handle_t handle, sdmmc_command_t *cmd)
+static bool board_touch_fetch(uint16_t *x, uint16_t *y, uint8_t *count_out)
 {
-    if (!s_board_has_expander) {
-        ESP_LOGE(TAG_SD, "SD transaction requested but IO expander unavailable");
-        return ESP_ERR_INVALID_STATE;
+    if (!s_touch_handle) {
+        return false;
     }
 
-    if (s_sd_diag_hold_cs_low) {
-        io_expander_sd_cs(true);
-        return sdspi_host_do_transaction(handle, cmd);
+    uint8_t count = 0;
+    esp_lcd_touch_read_data(s_touch_handle);
+
+    bool pressed = false;
+    esp_err_t err = ESP_OK;
+
+    if (esp_lcd_touch_get_data) {
+        err = esp_lcd_touch_get_data(s_touch_handle, x, y, NULL, &count, 1);
+        pressed = (err == ESP_OK && count > 0);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG_TOUCH, "esp_lcd_touch_get_data failed: %s", esp_err_to_name(err));
+        }
+    } else {
+        pressed = esp_lcd_touch_get_coordinates(s_touch_handle, x, y, NULL, &count, 1);
+        err = pressed ? ESP_OK : ESP_FAIL;
     }
 
-    io_expander_sd_cs(true);
-    esp_err_t ret = sdspi_host_do_transaction(handle, cmd);
-    io_expander_sd_cs(false);
-    return ret;
+    if (count_out) {
+        *count_out = count;
+    }
+    return pressed;
 }
 
 #define IO_EXP_PIN_TOUCH_RST 1
@@ -304,20 +319,27 @@ static void board_i2c_scan(void)
         return;
     }
 
-    const uint8_t expected[] = {0x24, 0x26, 0x38, 0x23, 0x5D, 0x14};
+    const uint8_t expected[] = {0x24, 0x5D, 0x14};
     int found = 0;
 
     esp_log_level_t prev_level = esp_log_level_get("i2c.master");
     esp_log_level_set("i2c.master", ESP_LOG_WARN);
 
-    ESP_LOGI(TAG_I2C, "Probing expected I2C devices @ %d Hz...", BOARD_I2C_FREQ_HZ);
+    ESP_LOGI(TAG_I2C, "Probing I2C endpoints (0x24/0x5D/0x14) @ %d Hz...", BOARD_I2C_FREQ_HZ);
     for (size_t i = 0; i < sizeof(expected); ++i) {
         esp_err_t err = i2c_master_probe(s_i2c_bus_handle, expected[i], pdMS_TO_TICKS(60));
         if (err == ESP_OK) {
             ++found;
         }
     }
-    ESP_LOGI(TAG_I2C, "I2C expected probe complete: %d/%d responded", found, (int)(sizeof(expected)));
+    ESP_LOGI(TAG_I2C, "I2C targeted probe complete: %d/%d responded", found, (int)(sizeof(expected)));
+
+#ifdef CONFIG_BOARD_I2C_FULL_SCAN_DEBUG
+    ESP_LOGW(TAG_I2C, "Debug full scan enabled (may log timeouts)");
+    for (uint8_t addr = 0x03; addr <= 0x77; ++addr) {
+        i2c_master_probe(s_i2c_bus_handle, addr, pdMS_TO_TICKS(10));
+    }
+#endif
 
     esp_log_level_set("i2c.master", prev_level);
 }
@@ -333,26 +355,30 @@ static esp_err_t board_i2c_selftest(void)
         ESP_LOGW(TAG_I2C, "I2C lines not pulled high at rest (pull-ups missing or device holding bus)");
     }
 
-    const struct {
+    struct {
         uint8_t addr;
         const char *label;
+        bool detected;
     } expected[] = {
-        {CH422_ADDR, "CH422G MODE"},
-        {0x26, "CH422G INPUT"},
-        {0x38, "CH422G OUT_LOW"},
-        {0x23, "CH422G OUT_HIGH"},
+        {0x24, "IO EXT"},
         {0x5D, "GT911 (alt1)"},
         {0x14, "GT911 (alt2)"},
     };
 
     int ack = 0;
+    esp_log_level_t prev_level = esp_log_level_get("i2c.master");
+    esp_log_level_set("i2c.master", ESP_LOG_WARN);
+
     for (size_t i = 0; i < sizeof(expected) / sizeof(expected[0]); ++i) {
-        esp_err_t err = i2c_master_probe(s_i2c_bus_handle, expected[i].addr, pdMS_TO_TICKS(40));
+        esp_err_t err = i2c_master_probe(s_i2c_bus_handle, expected[i].addr, pdMS_TO_TICKS(60));
         if (err == ESP_OK) {
             ++ack;
+            expected[i].detected = true;
             ESP_LOGI(TAG_I2C, "ACK 0x%02X (%s)", expected[i].addr, expected[i].label);
         }
     }
+
+    esp_log_level_set("i2c.master", prev_level);
 
     if (ack == 0) {
         ESP_LOGE(TAG_I2C, "I2C selftest: no expected device responded. Check pull-ups, power rails, and wiring (SDA=%d SCL=%d)",
@@ -360,12 +386,18 @@ static esp_err_t board_i2c_selftest(void)
 #if CONFIG_BOARD_REQUIRE_I2C_OK
         esp_system_abort("CONFIG_BOARD_REQUIRE_I2C_OK enabled: I2C bus down");
 #else
-        return ESP_ERR_NOT_FOUND;
+        ESP_LOGW(TAG_I2C, "Continuing despite I2C selftest failure (CONFIG_BOARD_REQUIRE_I2C_OK disabled)");
 #endif
+        return ESP_ERR_NOT_FOUND;
     }
 
-    ESP_LOGI(TAG_I2C, "I2C selftest: %d/%d expected address(es) acknowledged", ack,
-             (int)(sizeof(expected) / sizeof(expected[0])));
+    bool io_ok = expected[0].detected;
+    bool touch_ok = expected[1].detected || expected[2].detected;
+    ESP_LOGI(TAG_I2C, "I2C selftest: IO_EXT=%s, TOUCH=%s (ack %d/%d)",
+             io_ok ? "yes" : "no",
+             touch_ok ? "yes" : "no",
+             ack, (int)(sizeof(expected) / sizeof(expected[0])));
+
     return ESP_OK;
 }
 
@@ -752,11 +784,10 @@ static esp_err_t board_touch_init(void)
     err = esp_lcd_touch_new_i2c_gt911(io_handle, &tp_cfg, &s_touch_handle);
     if (err == ESP_OK) {
         ESP_LOGI(TAG_TOUCH, "GT911 init OK on I2C addr 0x%02X, INT=%d", gt911_addr, BOARD_TOUCH_INT);
-        esp_lcd_touch_read_data(s_touch_handle);
         uint16_t sample_x[1] = {0};
         uint16_t sample_y[1] = {0};
         uint8_t sample_cnt = 0;
-        bool pressed = esp_lcd_touch_get_coordinates(s_touch_handle, sample_x, sample_y, NULL, &sample_cnt, 1);
+        bool pressed = board_touch_fetch(sample_x, sample_y, &sample_cnt);
         ESP_LOGI(TAG_TOUCH, "GT911 sample: pressed=%d count=%u x=%u y=%u", pressed, sample_cnt, sample_x[0], sample_y[0]);
     }
     return err;
@@ -834,12 +865,6 @@ esp_err_t board_mount_sdcard(void)
         .allocation_unit_size = 16 * 1024
     };
 
-#if CONFIG_BOARD_SD_HOLD_CS_LOW_DIAG
-    s_sd_diag_hold_cs_low = true;
-#else
-    s_sd_diag_hold_cs_low = false;
-#endif
-
     if (!s_board_has_expander) {
         if (!s_logged_expander_absent) {
             ESP_LOGW(TAG_SD, "Skipping SD mount: IO expander unavailable for CS control");
@@ -848,21 +873,7 @@ esp_err_t board_mount_sdcard(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (s_sd_diag_hold_cs_low) {
-        ESP_LOGW(TAG_SD, "SD diagnostic: forcing EXIO4 (SD_CS) low for SDSPI init");
-        io_expander_sd_cs(true);
-    } else {
-        ESP_LOGI(TAG_SD, "SD CS diagnostic pulse (low->high)");
-        io_expander_sd_cs(true);
-        board_delay_for_sd();
-        io_expander_sd_cs(false);
-        board_delay_for_sd();
-    }
-
-    ESP_LOGI(TAG_SD, "Initializing SD Card via SPI (Waveshare 7B, CS via CH422G)...");
-
-    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    host.max_freq_khz = 400; // start slow, will be increased once stable
+    ESP_LOGI(TAG_SD, "Initializing SD Card via SPI (CS=EXIO4 via IO extender)...");
 
     spi_bus_config_t bus_cfg = {
         .mosi_io_num = BOARD_SD_MOSI,
@@ -873,53 +884,43 @@ esp_err_t board_mount_sdcard(void)
         .max_transfer_sz = 4000,
     };
 
-    // Note: If SPI bus is shared, check if it's already initialized.
-    esp_err_t ret = spi_bus_initialize(host.slot, &bus_cfg, SDSPI_DEFAULT_DMA);
-    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
-        ESP_LOGE(TAG_SD, "Failed to initialize SPI bus: %s", esp_err_to_name(ret));
-        return ret;
-    }
-
-    // Attach SD device to SPI bus without hardware CS (handled by expander)
     sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
     slot_config.host_id = BOARD_SD_SPI_HOST;
     slot_config.gpio_cs = SDSPI_SLOT_NO_CS;
     slot_config.gpio_int = SDSPI_SLOT_NO_INT;
 
-    ret = sdspi_host_init_device(&slot_config, &s_sdspi_handle);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG_SD, "Failed to init SDSPI device: %s", esp_err_to_name(ret));
-        return ret;
-    }
-
-    host.slot = s_sdspi_handle;
-    host.do_transaction = sdspi_transaction_with_expander;
-
     const char mount_point[] = "/sdcard";
-
-    // Ensure CS is in the expected idle state before bus activity
-    if (s_sd_diag_hold_cs_low) {
-        io_expander_sd_cs(true);
-    } else {
-        io_expander_sd_cs(false);
-    }
-    board_delay_for_sd();
-
-    // Retry a few times with progressive frequency to cope with slow cards
     static const int freq_table_khz[] = {400, 1000, 5000, 20000};
     const size_t max_attempts = sizeof(freq_table_khz) / sizeof(freq_table_khz[0]);
+    esp_err_t ret = ESP_FAIL;
+
+    // Ensure CS idles high before the first clock train
+    io_expander_sd_cs(false);
+    board_delay_for_sd();
 
     for (size_t attempt = 0; attempt < max_attempts; ++attempt) {
-        host.max_freq_khz = freq_table_khz[attempt];
-        ESP_LOGI(TAG_SD, "SD attempt %d/%d @ %dkHz (MISO=%d MOSI=%d SCLK=%d CS=EXIO%u)",
-                 (int)(attempt + 1), (int)max_attempts, host.max_freq_khz,
-                 BOARD_SD_MISO, BOARD_SD_MOSI, BOARD_SD_CLK, IO_EXP_PIN_SD_CS);
+        slot_config.clock_speed_hz = freq_table_khz[attempt] * 1000;
+        sdspi_ioext_config_t ioext_cfg = {
+            .spi_host = BOARD_SD_SPI_HOST,
+            .bus_cfg = &bus_cfg,
+            .slot_config = slot_config,
+            .set_cs_cb = (sdspi_ioext_cs_cb_t)io_expander_sd_cs,
+            .cs_user_ctx = NULL,
+            .cs_setup_delay_us = 5,
+            .cs_hold_delay_us = 5,
+            .initial_clocks = 80,
+        };
 
-        // Toggle CS high between attempts (unless held low for diagnostics)
-        if (!s_sd_diag_hold_cs_low) {
-            io_expander_sd_cs(false);
-            board_delay_for_sd();
+        sdmmc_host_t host = {0};
+        ret = sdspi_ioext_host_init(&ioext_cfg, &host, &s_sdspi_handle);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG_SD, "SD host init failed @%dkHz: %s", freq_table_khz[attempt], esp_err_to_name(ret));
+            continue;
         }
+
+        ESP_LOGI(TAG_SD, "SD attempt %d/%d @ %dkHz (MISO=%d MOSI=%d SCLK=%d CS=EXIO%u)",
+                 (int)(attempt + 1), (int)max_attempts, freq_table_khz[attempt],
+                 BOARD_SD_MISO, BOARD_SD_MOSI, BOARD_SD_CLK, IO_EXP_PIN_SD_CS);
 
         ret = esp_vfs_fat_sdspi_mount(mount_point, &host, &slot_config, &mount_config, &s_card);
         if (ret == ESP_OK) {
@@ -929,6 +930,10 @@ esp_err_t board_mount_sdcard(void)
         }
 
         ESP_LOGW(TAG_SD, "SD mount failed (attempt %d): %s", attempt + 1, esp_err_to_name(ret));
+        sdspi_ioext_host_deinit(s_sdspi_handle, BOARD_SD_SPI_HOST, false);
+        s_sdspi_handle = NULL;
+        io_expander_sd_cs(false);
+        board_delay_for_sd();
     }
 
     if (ret == ESP_FAIL) {
@@ -978,7 +983,6 @@ esp_err_t board_init(void)
     if (sd_err != ESP_OK) {
         ESP_LOGW(TAG_SD, "SD card not mounted: %s", esp_err_to_name(sd_err));
         s_card = NULL;
-        status = (status == ESP_OK) ? sd_err : status;
     }
 
     esp_err_t calib_err = board_load_battery_calibration();
