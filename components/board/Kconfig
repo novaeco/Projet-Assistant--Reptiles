@@ -24,15 +24,15 @@ config BOARD_SD_HOLD_CS_LOW_DIAG
         transactions. Useful for diagnosing CS gating/timeout issues coming from
         the IO expander. Disable for normal operation.
 
-config BOARD_REQUIRE_CH422G
-    bool "Abort boot if CH422G IO expander is missing"
+config BOARD_REQUIRE_IO_EXPANDER
+    bool "Abort boot if IO expander is missing"
     default n
     help
-        When enabled, the firmware aborts at boot if the CH422G IO expander
-        does not acknowledge all expected I2C addresses or if initialization
-        (SYS_PARAM write, output staging) fails. When disabled (default),
-        the system degrades gracefully and disables peripherals that rely on
-        the expander (touch, SD, backlight PWM, battery sense).
+        When enabled, the firmware aborts at boot if the selected IO expander
+        does not acknowledge on the I2C bus or fails initialization. When
+        disabled (default), the system degrades gracefully and disables
+        peripherals that rely on the expander (touch reset, SD CS, backlight
+        PWM, battery sense).
 
 config BOARD_REQUIRE_I2C_OK
     bool "Abort boot if I2C bus is non-functional"
@@ -49,5 +49,54 @@ config BOARD_I2C_ENABLE_INTERNAL_PULLUP
         Enable the ESP32-S3 internal pull-ups on SDA/SCL when configuring the
         master bus. Disable if strong external pull-ups are present and you
         want to minimize biasing, or for debugging suspected pull-up issues.
+
+choice BOARD_IOEXP_DRIVER
+    prompt "IO expander driver"
+    default BOARD_IOEXP_DRIVER_WAVESHARE
+
+config BOARD_IOEXP_DRIVER_WAVESHARE
+    bool "Waveshare IO extension (CH32V003 firmware)"
+    help
+        Use the Waveshare-provided IO extension microcontroller (CH32V003) as
+        shipped on recent ESP32-S3-Touch-LCD-7B boards. This backend supports
+        PWM backlight and ADC-based battery sense.
+
+config BOARD_IOEXP_DRIVER_CH422G
+    bool "Legacy CH422G"
+    help
+        Use the legacy CH422G IO expander backend for older board revisions
+        that kept the CH422G. PWM backlight is emulated as ON/OFF.
+endchoice
+
+config BOARD_IOEXP_ALLOW_CH422G_FALLBACK
+    bool "Allow CH422G fallback when Waveshare IO extension is missing"
+    default y
+    help
+        When enabled, the firmware will try the legacy CH422G backend if the
+        Waveshare IO extension is selected but not detected. Disable when the
+        board is known to only ship the CH32V003 firmware.
+
+config BOARD_BATTERY_ENABLE
+    bool "Enable battery sensing via IO expander"
+    default n
+    help
+        When enabled, the board driver reads battery level via the IO
+        expander. Disable when no battery is connected to avoid useless
+        transactions and logs.
+
+config BOARD_I2C_PORT
+    int "I2C controller number"
+    range 0 1
+    default 0
+
+config BOARD_I2C_SDA
+    int "I2C SDA GPIO"
+    range 0 48
+    default 8
+
+config BOARD_I2C_SCL
+    int "I2C SCL GPIO"
+    range 0 48
+    default 9
 
 endmenu

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "driver/gpio.h"
+#include "sdkconfig.h"
 
 // =============================================================================
 // LCD RGB Interface (Waveshare ESP32-S3-Touch-LCD-7B)
@@ -42,9 +43,9 @@
 // =============================================================================
 // I2C Bus (Touch GT911 & IO Expander CH422G)
 // =============================================================================
-#define BOARD_I2C_PORT           I2C_NUM_0
-#define BOARD_I2C_SDA            GPIO_NUM_8
-#define BOARD_I2C_SCL            GPIO_NUM_9
+#define BOARD_I2C_PORT           CONFIG_BOARD_I2C_PORT
+#define BOARD_I2C_SDA            CONFIG_BOARD_I2C_SDA
+#define BOARD_I2C_SCL            CONFIG_BOARD_I2C_SCL
 #define BOARD_I2C_FREQ_HZ        100000
 
 // Touch GT911

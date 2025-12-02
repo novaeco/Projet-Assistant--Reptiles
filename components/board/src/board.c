@@ -23,18 +23,21 @@
 #include "reptile_storage.h"
 #include "esp_rom_sys.h"
 #include "esp_system.h"
+#include "io_extension_waveshare.h"
 
 static const char *TAG = "BOARD";
 static const char *TAG_I2C = "BOARD_I2C";
 static const char *TAG_CH422 = "CH422G";
 static const char *TAG_TOUCH = "GT911";
 static const char *TAG_SD = "BOARD_SD";
+static const char *TAG_IO = "IO_EXT";
 
 static esp_lcd_panel_handle_t s_lcd_panel_handle = NULL;
 static esp_lcd_touch_handle_t s_touch_handle = NULL;
 static sdmmc_card_t *s_card = NULL;
 static i2c_master_bus_handle_t s_i2c_bus_handle = NULL;
 static i2c_master_dev_handle_t s_io_dev = NULL;
+static io_extension_ws_handle_t s_io_ws = NULL;
 static bool s_board_has_expander = false;
 static bool s_board_has_lcd = false;
 static uint16_t s_io_state = 0;
@@ -44,6 +47,14 @@ static uint8_t s_batt_raw_full = CONFIG_BOARD_BATTERY_RAW_FULL;
 static bool s_sd_diag_hold_cs_low = false;
 static bool s_logged_expander_absent = false;
 static bool s_logged_batt_unavailable = false;
+
+typedef enum {
+    IO_DRIVER_NONE = 0,
+    IO_DRIVER_WAVESHARE,
+    IO_DRIVER_CH422,
+} io_driver_kind_t;
+
+static io_driver_kind_t s_io_driver = IO_DRIVER_NONE;
 
 typedef struct {
     bool mode_ack;
@@ -280,6 +291,7 @@ static esp_err_t board_i2c_init(void)
     ESP_LOGI(TAG_I2C, "Initializing I2C bus (SDA=%d SCL=%d @ %d Hz, internal PU=%s)...", BOARD_I2C_SDA, BOARD_I2C_SCL,
              BOARD_I2C_FREQ_HZ, CONFIG_BOARD_I2C_ENABLE_INTERNAL_PULLUP ? "on" : "off");
     ESP_RETURN_ON_ERROR(i2c_new_master_bus(&bus_config, &s_i2c_bus_handle), TAG_I2C, "I2C bus create failed");
+    vTaskDelay(pdMS_TO_TICKS(100));
     ESP_RETURN_ON_ERROR(board_i2c_selftest(), TAG_I2C, "I2C selftest failed");
     board_i2c_scan();
     return ESP_OK;
@@ -292,32 +304,20 @@ static void board_i2c_scan(void)
         return;
     }
 
+    const uint8_t expected[] = {0x24, 0x26, 0x38, 0x23, 0x5D, 0x14};
     int found = 0;
-    char line[128] = {0};
-    size_t line_len = 0;
 
     esp_log_level_t prev_level = esp_log_level_get("i2c.master");
     esp_log_level_set("i2c.master", ESP_LOG_WARN);
 
-    ESP_LOGI(TAG_I2C, "Scanning I2C bus (0x03-0x77) @ %d Hz...", BOARD_I2C_FREQ_HZ);
-    for (uint8_t addr = 0x03; addr <= 0x77; ++addr) {
-        esp_err_t err = i2c_master_probe(s_i2c_bus_handle, addr, pdMS_TO_TICKS(20));
+    ESP_LOGI(TAG_I2C, "Probing expected I2C devices @ %d Hz...", BOARD_I2C_FREQ_HZ);
+    for (size_t i = 0; i < sizeof(expected); ++i) {
+        esp_err_t err = i2c_master_probe(s_i2c_bus_handle, expected[i], pdMS_TO_TICKS(60));
         if (err == ESP_OK) {
             ++found;
-            int n = snprintf(line + line_len, sizeof(line) - line_len, "0x%02X ", addr);
-            if (n <= 0 || (size_t)n >= sizeof(line) - line_len) {
-                ESP_LOGI(TAG_I2C, "Found: %s", line);
-                line_len = 0;
-                line[0] = '\0';
-                n = snprintf(line + line_len, sizeof(line) - line_len, "0x%02X ", addr);
-            }
-            line_len += (size_t)n;
         }
     }
-    if (line_len > 0) {
-        ESP_LOGI(TAG_I2C, "Found: %s", line);
-    }
-    ESP_LOGI(TAG_I2C, "I2C scan complete: %d device(s) responded", found);
+    ESP_LOGI(TAG_I2C, "I2C expected probe complete: %d/%d responded", found, (int)(sizeof(expected)));
 
     esp_log_level_set("i2c.master", prev_level);
 }
@@ -436,6 +436,9 @@ static esp_err_t ch422_read_inputs(uint8_t *value)
 
 static esp_err_t io_expander_apply_outputs(void)
 {
+    if (s_io_driver != IO_DRIVER_CH422) {
+        return ESP_OK;
+    }
     uint8_t out = (uint8_t)(s_io_state & 0xFF);
     uint8_t payload[2] = {CH422_CMD_IO_OUTPUT, out};
     ESP_RETURN_ON_ERROR(ch422_send_cmd(payload, sizeof(payload), "CH422 IO_OUT"), TAG_CH422,
@@ -445,26 +448,38 @@ static esp_err_t io_expander_apply_outputs(void)
 
 static esp_err_t io_expander_set_output(uint8_t pin, bool level)
 {
-    if (pin >= 12) {
-        ESP_LOGE(TAG_CH422, "Invalid CH422 pin %u", pin);
-        return ESP_ERR_INVALID_ARG;
+    switch (s_io_driver) {
+    case IO_DRIVER_WAVESHARE:
+        return io_extension_ws_set_output(s_io_ws, pin, level);
+    case IO_DRIVER_CH422:
+        if (pin >= 12) {
+            ESP_LOGE(TAG_CH422, "Invalid CH422 pin %u", pin);
+            return ESP_ERR_INVALID_ARG;
+        }
+        if (level) {
+            s_io_state |= (1U << pin);
+        } else {
+            s_io_state &= ~(1U << pin);
+        }
+        return io_expander_apply_outputs();
+    default:
+        return ESP_ERR_INVALID_STATE;
     }
-
-    if (level) {
-        s_io_state |= (1U << pin);
-    } else {
-        s_io_state &= ~(1U << pin);
-    }
-    return io_expander_apply_outputs();
 }
 
 static esp_err_t io_expander_set_pwm(uint8_t duty)
 {
-    // CH422G lacks hardware PWM; use digital on/off as a pragmatic fallback.
     if (!s_board_has_expander) {
         return ESP_ERR_INVALID_STATE;
     }
-    return io_expander_set_output(IO_EXP_PIN_BK, duty != 0);
+    switch (s_io_driver) {
+    case IO_DRIVER_WAVESHARE:
+        return io_extension_ws_set_pwm_percent(s_io_ws, duty);
+    case IO_DRIVER_CH422:
+        return io_expander_set_output(IO_EXP_PIN_BK, duty != 0);
+    default:
+        return ESP_ERR_INVALID_STATE;
+    }
 }
 
 static esp_err_t io_expander_sd_cs(bool assert)
@@ -473,16 +488,33 @@ static esp_err_t io_expander_sd_cs(bool assert)
     return io_expander_set_output(IO_EXP_PIN_SD_CS, !assert);
 }
 
-static esp_err_t board_io_expander_init(void)
+static esp_err_t board_io_expander_post_init_defaults(void)
 {
-    ESP_LOGI(TAG_CH422, "Initializing IO Expander (CH422G)...");
-    s_board_has_expander = false;
+    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_VDD, true), TAG_IO, "LCD_VDD on failed");
+    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_BK, true), TAG_IO, "BK default on failed");
+    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_TOUCH_RST, true), TAG_IO, "TP_RST default high failed");
+    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_SD_CS, true), TAG_IO, "SD CS idle high failed");
+    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_CAN_USB, false), TAG_IO, "CAN/USB default failed");
 
-    if (!s_i2c_bus_handle) {
-        ESP_LOGE(TAG_CH422, "I2C bus not ready for IO expander");
-        return ESP_ERR_INVALID_STATE;
+    if (s_io_driver == IO_DRIVER_CH422) {
+        ESP_RETURN_ON_ERROR(io_expander_apply_outputs(), TAG_CH422, "apply outputs failed");
+        ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_RST, false), TAG_CH422, "LCD_RST low failed");
+        vTaskDelay(pdMS_TO_TICKS(5));
+        ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_RST, true), TAG_CH422, "LCD_RST high failed");
+        vTaskDelay(pdMS_TO_TICKS(10));
+        ESP_RETURN_ON_ERROR(io_expander_set_pwm(100), TAG_CH422, "PWM init failed");
+    } else if (s_io_driver == IO_DRIVER_WAVESHARE) {
+        ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_RST, false), TAG_IO, "LCD_RST low failed");
+        vTaskDelay(pdMS_TO_TICKS(5));
+        ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_RST, true), TAG_IO, "LCD_RST high failed");
+        vTaskDelay(pdMS_TO_TICKS(10));
+        ESP_RETURN_ON_ERROR(io_expander_set_pwm(100), TAG_IO, "PWM init failed");
     }
+    return ESP_OK;
+}
 
+static esp_err_t board_ioexp_init_ch422(void)
+{
     const int attempts = 3;
     esp_err_t probe_err = ESP_FAIL;
     ch422_probe_result_t probe = {0};
@@ -499,12 +531,7 @@ static esp_err_t board_io_expander_init(void)
     }
 
     if (probe_err != ESP_OK) {
-#if CONFIG_BOARD_REQUIRE_CH422G
-        esp_system_abort("CONFIG_BOARD_REQUIRE_CH422G enabled: IO expander missing or incomplete");
-#else
-        s_logged_expander_absent = true;
         return probe_err;
-#endif
     }
 
     esp_err_t add_err = ch422_add_device();
@@ -512,66 +539,94 @@ static esp_err_t board_io_expander_init(void)
         return add_err;
     }
 
-    // Configure System Parameter byte for IO extension + push-pull outputs (datasheet: SYS=0x7F expected by board)
     uint8_t sys_param = CH422_CMD_SYS_PARAM | 0x7F;
     esp_err_t sys_err = ch422_send_cmd(&sys_param, 1, "CH422 SYS_PARAM");
     if (sys_err != ESP_OK) {
         ch422_release_handle();
-#if CONFIG_BOARD_REQUIRE_CH422G
-        esp_system_abort("IO expander SYS_PARAM write failed");
-#else
         return sys_err;
-#endif
     }
 
-    // Default outputs high for inactive CS / released resets / power enables
-    s_io_state = 0;
-    esp_err_t out_err = ESP_OK;
-    esp_err_t err_tmp = io_expander_set_output(IO_EXP_PIN_LCD_VDD, true);
-    if (err_tmp != ESP_OK && out_err == ESP_OK) { out_err = err_tmp; }
-    err_tmp = io_expander_set_output(IO_EXP_PIN_BK, true);
-    if (err_tmp != ESP_OK && out_err == ESP_OK) { out_err = err_tmp; }
-    err_tmp = io_expander_set_output(IO_EXP_PIN_TOUCH_RST, true);
-    if (err_tmp != ESP_OK && out_err == ESP_OK) { out_err = err_tmp; }
-    err_tmp = io_expander_set_output(IO_EXP_PIN_SD_CS, true);
-    if (err_tmp != ESP_OK && out_err == ESP_OK) { out_err = err_tmp; }
-    err_tmp = io_expander_set_output(IO_EXP_PIN_CAN_USB, false);
-    if (err_tmp != ESP_OK && out_err == ESP_OK) { out_err = err_tmp; }
-
-    if (out_err != ESP_OK) {
-        ESP_LOGE(TAG_CH422, "CH422G output staging failed: %s", esp_err_to_name(out_err));
-        ch422_release_handle();
-#if CONFIG_BOARD_REQUIRE_CH422G
-        esp_system_abort("IO expander outputs could not be applied");
-#else
-        return out_err;
-#endif
-    }
-
-    esp_err_t apply_err = io_expander_apply_outputs();
-    if (apply_err != ESP_OK) {
-        ch422_release_handle();
-#if CONFIG_BOARD_REQUIRE_CH422G
-        esp_system_abort("IO expander outputs apply failed");
-#else
-        return apply_err;
-#endif
-    }
-
+    s_io_driver = IO_DRIVER_CH422;
     s_board_has_expander = true;
-    ESP_LOGI(TAG_CH422, "CH422G init OK, IO_OUT=0x%02X", (uint8_t)(s_io_state & 0xFF));
+    s_io_state = 0;
+    ESP_LOGI(TAG_CH422, "CH422G init OK, applying defaults");
+    return board_io_expander_post_init_defaults();
+}
 
-    // Allow panel power to settle before reset sequence
-    vTaskDelay(pdMS_TO_TICKS(10));
+static esp_err_t board_ioexp_init_waveshare(void)
+{
+    const uint8_t addr = 0x24;
+    esp_err_t probe = i2c_master_probe(s_i2c_bus_handle, addr, pdMS_TO_TICKS(120));
+    if (probe != ESP_OK) {
+        ESP_LOGW(TAG_IO, "Waveshare IO extension did not ACK at 0x%02X: %s", addr, esp_err_to_name(probe));
+        return probe;
+    }
 
-    // Hold LCD reset low, then release
-    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_RST, false), TAG_CH422, "CH422 LCD_RST low failed");
-    vTaskDelay(pdMS_TO_TICKS(5));
-    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_RST, true), TAG_CH422, "CH422 LCD_RST high failed");
+    io_extension_ws_config_t cfg = {
+        .bus = s_i2c_bus_handle,
+        .address = addr,
+        .scl_speed_hz = BOARD_I2C_FREQ_HZ,
+    };
 
-    // Turn on backlight fully via digital enable
-    ESP_RETURN_ON_ERROR(io_expander_set_pwm(0xFF), TAG_CH422, "CH422 PWM init failed");
+    esp_err_t err = io_extension_ws_init(&cfg, &s_io_ws);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG_IO, "Waveshare IO extension init failed: %s", esp_err_to_name(err));
+        return err;
+    }
 
+    s_io_driver = IO_DRIVER_WAVESHARE;
+    s_board_has_expander = true;
+    ESP_LOGI(TAG_IO, "Waveshare IO extension ready, applying defaults");
+    esp_err_t defaults_err = board_io_expander_post_init_defaults();
+    if (defaults_err != ESP_OK) {
+        io_extension_ws_deinit(s_io_ws);
+        s_io_ws = NULL;
+        s_board_has_expander = false;
+        s_io_driver = IO_DRIVER_NONE;
+        return defaults_err;
+    }
+    return ESP_OK;
+}
+
+static esp_err_t board_io_expander_init(void)
+{
+    ESP_LOGI(TAG_IO, "Initializing IO expander backend...");
+    s_board_has_expander = false;
+    s_io_driver = IO_DRIVER_NONE;
+    s_io_ws = NULL;
+
+    if (!s_i2c_bus_handle) {
+        ESP_LOGE(TAG_IO, "I2C bus not ready for IO expander");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t err = ESP_ERR_NOT_FOUND;
+
+#if CONFIG_BOARD_IOEXP_DRIVER_WAVESHARE
+    err = board_ioexp_init_waveshare();
+    if (err != ESP_OK) {
+#if CONFIG_BOARD_IOEXP_ALLOW_CH422G_FALLBACK
+        ESP_LOGW(TAG_IO, "Falling back to CH422G backend after Waveshare init failure (%s)", esp_err_to_name(err));
+        err = board_ioexp_init_ch422();
+#endif
+    }
+#elif CONFIG_BOARD_IOEXP_DRIVER_CH422G
+    err = board_ioexp_init_ch422();
+#endif
+
+    if (err != ESP_OK) {
+        s_board_has_expander = false;
+        s_io_driver = IO_DRIVER_NONE;
+        s_logged_expander_absent = true;
+#if CONFIG_BOARD_REQUIRE_IO_EXPANDER
+        esp_system_abort("IO expander missing and required");
+#endif
+        return err;
+    }
+
+    ESP_LOGI(TAG_IO, "IO expander backend ready (%s)",
+             s_io_driver == IO_DRIVER_WAVESHARE ? "Waveshare CH32V003" : "CH422G");
+    vTaskDelay(pdMS_TO_TICKS(50));
     return ESP_OK;
 }
 
@@ -902,7 +957,7 @@ esp_err_t board_init(void)
     esp_err_t expander_err = board_io_expander_init();
     if (expander_err != ESP_OK) {
         s_board_has_expander = false;
-        ESP_LOGE(TAG_CH422, "IO expander init failed: %s (continuing without EXIO)", esp_err_to_name(expander_err));
+        ESP_LOGE(TAG_IO, "IO expander init failed: %s (continuing without EXIO)", esp_err_to_name(expander_err));
         status = (status == ESP_OK) ? expander_err : status;
     }
 
@@ -932,6 +987,7 @@ esp_err_t board_init(void)
                  (unsigned)s_batt_raw_empty, (unsigned)s_batt_raw_full, esp_err_to_name(calib_err));
     }
 
+#if CONFIG_BOARD_BATTERY_ENABLE
     uint8_t batt_pct = 0;
     uint8_t batt_raw = 0;
     esp_err_t batt_err = board_get_battery_level(&batt_pct, &batt_raw);
@@ -943,6 +999,7 @@ esp_err_t board_init(void)
     } else if (batt_err != ESP_ERR_INVALID_STATE) {
         ESP_LOGW(TAG, "Battery read failed: %s", esp_err_to_name(batt_err));
     }
+#endif
 
     return status;
 }
@@ -955,14 +1012,17 @@ esp_err_t board_set_backlight_percent(uint8_t percent)
     if (!s_board_has_expander) {
         return ESP_ERR_INVALID_STATE;
     }
-    // Cap to ~97% to mirror Waveshare firmware safeguard
-    uint8_t duty = (uint8_t)((percent * 248) / 100);
-    ESP_LOGD(TAG, "Backlight percent=%u -> duty=%u", percent, duty);
-    esp_err_t err = io_expander_set_pwm(duty);
+    if (s_io_driver == IO_DRIVER_WAVESHARE) {
+        ESP_LOGI(TAG, "Backlight set to %u%% via Waveshare PWM", percent);
+        return io_expander_set_pwm(percent);
+    }
+    // CH422G lacks PWM, fall back to digital
+    ESP_LOGI(TAG, "Backlight set to %u%% (digital) via CH422G", percent);
+    esp_err_t err = io_expander_set_output(IO_EXP_PIN_BK, percent > 0);
     if (err != ESP_OK) {
         return err;
     }
-    return io_expander_set_output(IO_EXP_PIN_BK, percent > 0);
+    return ESP_OK;
 }
 
 esp_err_t board_io_expander_read_inputs(uint8_t *inputs)
@@ -975,7 +1035,14 @@ esp_err_t board_io_expander_read_inputs(uint8_t *inputs)
         return ESP_ERR_INVALID_STATE;
     }
 
-    return ch422_read_inputs(inputs);
+    switch (s_io_driver) {
+    case IO_DRIVER_WAVESHARE:
+        return io_extension_ws_read_inputs(s_io_ws, inputs);
+    case IO_DRIVER_CH422:
+        return ch422_read_inputs(inputs);
+    default:
+        return ESP_ERR_INVALID_STATE;
+    }
 }
 
 esp_err_t board_battery_set_calibration(uint8_t raw_empty, uint8_t raw_full)
@@ -1019,9 +1086,13 @@ esp_err_t board_get_battery_level(uint8_t *percent, uint8_t *raw)
         return ESP_ERR_INVALID_ARG;
     }
 
+#if !CONFIG_BOARD_BATTERY_ENABLE
+    return ESP_ERR_INVALID_STATE;
+#endif
+
     if (!s_board_has_expander) {
         if (!s_logged_batt_unavailable) {
-            ESP_LOGW(TAG_CH422, "Battery sense unavailable: IO expander not initialized");
+            ESP_LOGW(TAG_IO, "Battery sense unavailable: IO expander not initialized");
             s_logged_batt_unavailable = true;
         }
         return ESP_ERR_INVALID_STATE;
