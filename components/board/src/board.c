@@ -56,6 +56,7 @@ typedef struct {
 
 static void board_log_i2c_levels(const char *stage);
 static esp_err_t board_i2c_recover_bus(void);
+static esp_err_t board_i2c_selftest(void);
 static esp_err_t ch422_probe(ch422_probe_result_t *result);
 static void ch422_log_probe_result(const ch422_probe_result_t *result);
 
@@ -102,24 +103,24 @@ static esp_err_t board_i2c_recover_bus(void)
     gpio_config_t cfg = {
         .pin_bit_mask = BIT64(BOARD_I2C_SDA) | BIT64(BOARD_I2C_SCL),
         .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE,
     };
     gpio_config(&cfg);
 
-    board_log_i2c_levels("pre-recovery");
-
     int sda_level = gpio_get_level(BOARD_I2C_SDA);
     int scl_level = gpio_get_level(BOARD_I2C_SCL);
-    if (sda_level == 1 && scl_level == 1) {
-        ESP_LOGI(TAG_I2C, "I2C bus already idle");
-        return ESP_OK;
+    board_log_i2c_levels("pre-recovery");
+
+    if (sda_level == 0 || scl_level == 0) {
+        ESP_LOGW(TAG_I2C, "I2C bus not idle before recovery (SDA=%d SCL=%d)", sda_level, scl_level);
+    } else {
+        ESP_LOGI(TAG_I2C, "I2C bus idle, sending recovery sequence proactively");
     }
 
-    ESP_LOGW(TAG_I2C, "Recovering I2C bus (SDA=%d SCL=%d stuck)", sda_level, scl_level);
-
     cfg.mode = GPIO_MODE_INPUT_OUTPUT_OD;
+    cfg.pull_up_en = GPIO_PULLUP_ENABLE;
     gpio_config(&cfg);
 
     // Pulse SCL to release potential slaves holding SDA
@@ -128,9 +129,6 @@ static esp_err_t board_i2c_recover_bus(void)
         esp_rom_delay_us(5);
         gpio_set_level(BOARD_I2C_SCL, 1);
         esp_rom_delay_us(5);
-        if (gpio_get_level(BOARD_I2C_SDA) == 1 && gpio_get_level(BOARD_I2C_SCL) == 1) {
-            break;
-        }
     }
 
     // Send a STOP condition (SDA rising while SCL high)
@@ -142,6 +140,7 @@ static esp_err_t board_i2c_recover_bus(void)
     esp_rom_delay_us(5);
 
     cfg.mode = GPIO_MODE_INPUT;
+    cfg.pull_up_en = GPIO_PULLUP_DISABLE;
     gpio_config(&cfg);
 
     board_log_i2c_levels("post-recovery");
@@ -159,7 +158,7 @@ static esp_err_t board_i2c_recover_bus(void)
 
 static esp_err_t io_expander_sd_cs(bool assert);
 static void board_i2c_scan(void);
-static esp_err_t gt911_detect_i2c_addr(uint8_t *addr_out);
+static esp_err_t gt911_detect_i2c_addr(uint8_t *addr_out, bool can_reset);
 
 static esp_err_t sdspi_transaction_with_expander(sdspi_dev_handle_t handle, sdmmc_command_t *cmd)
 {
@@ -275,12 +274,13 @@ static esp_err_t board_i2c_init(void)
         .scl_io_num = BOARD_I2C_SCL,
         .clk_source = I2C_CLK_SRC_DEFAULT,
         .glitch_ignore_cnt = 7,
-        .flags.enable_internal_pullup = true,
+        .flags.enable_internal_pullup = CONFIG_BOARD_I2C_ENABLE_INTERNAL_PULLUP,
     };
 
-    ESP_LOGI(TAG_I2C, "Initializing I2C bus (SDA=%d SCL=%d @ %d Hz)...", BOARD_I2C_SDA, BOARD_I2C_SCL,
-             BOARD_I2C_FREQ_HZ);
+    ESP_LOGI(TAG_I2C, "Initializing I2C bus (SDA=%d SCL=%d @ %d Hz, internal PU=%s)...", BOARD_I2C_SDA, BOARD_I2C_SCL,
+             BOARD_I2C_FREQ_HZ, CONFIG_BOARD_I2C_ENABLE_INTERNAL_PULLUP ? "on" : "off");
     ESP_RETURN_ON_ERROR(i2c_new_master_bus(&bus_config, &s_i2c_bus_handle), TAG_I2C, "I2C bus create failed");
+    ESP_RETURN_ON_ERROR(board_i2c_selftest(), TAG_I2C, "I2C selftest failed");
     board_i2c_scan();
     return ESP_OK;
 }
@@ -295,6 +295,9 @@ static void board_i2c_scan(void)
     int found = 0;
     char line[128] = {0};
     size_t line_len = 0;
+
+    esp_log_level_t prev_level = esp_log_level_get("i2c.master");
+    esp_log_level_set("i2c.master", ESP_LOG_WARN);
 
     ESP_LOGI(TAG_I2C, "Scanning I2C bus (0x03-0x77) @ %d Hz...", BOARD_I2C_FREQ_HZ);
     for (uint8_t addr = 0x03; addr <= 0x77; ++addr) {
@@ -316,6 +319,20 @@ static void board_i2c_scan(void)
     }
     ESP_LOGI(TAG_I2C, "I2C scan complete: %d device(s) responded", found);
 
+    esp_log_level_set("i2c.master", prev_level);
+}
+
+static esp_err_t board_i2c_selftest(void)
+{
+    ESP_RETURN_ON_FALSE(s_i2c_bus_handle, ESP_ERR_INVALID_STATE, TAG_I2C, "I2C handle missing for selftest");
+
+    int sda = gpio_get_level(BOARD_I2C_SDA);
+    int scl = gpio_get_level(BOARD_I2C_SCL);
+    ESP_LOGI(TAG_I2C, "I2C idle check: SDA=%d SCL=%d", sda, scl);
+    if (sda == 0 || scl == 0) {
+        ESP_LOGW(TAG_I2C, "I2C lines not pulled high at rest (pull-ups missing or device holding bus)");
+    }
+
     const struct {
         uint8_t addr;
         const char *label;
@@ -328,15 +345,28 @@ static void board_i2c_scan(void)
         {0x14, "GT911 (alt2)"},
     };
 
+    int ack = 0;
     for (size_t i = 0; i < sizeof(expected) / sizeof(expected[0]); ++i) {
-        esp_err_t err = i2c_master_probe(s_i2c_bus_handle, expected[i].addr, pdMS_TO_TICKS(50));
+        esp_err_t err = i2c_master_probe(s_i2c_bus_handle, expected[i].addr, pdMS_TO_TICKS(40));
         if (err == ESP_OK) {
+            ++ack;
             ESP_LOGI(TAG_I2C, "ACK 0x%02X (%s)", expected[i].addr, expected[i].label);
-        } else {
-            ESP_LOGW(TAG_I2C, "No response at 0x%02X (%s): %s", expected[i].addr, expected[i].label,
-                      esp_err_to_name(err));
         }
     }
+
+    if (ack == 0) {
+        ESP_LOGE(TAG_I2C, "I2C selftest: no expected device responded. Check pull-ups, power rails, and wiring (SDA=%d SCL=%d)",
+                 sda, scl);
+#if CONFIG_BOARD_REQUIRE_I2C_OK
+        esp_system_abort("CONFIG_BOARD_REQUIRE_I2C_OK enabled: I2C bus down");
+#else
+        return ESP_ERR_NOT_FOUND;
+#endif
+    }
+
+    ESP_LOGI(TAG_I2C, "I2C selftest: %d/%d expected address(es) acknowledged", ack,
+             (int)(sizeof(expected) / sizeof(expected[0])));
+    return ESP_OK;
 }
 
 static esp_err_t ch422_add_device(void)
@@ -453,9 +483,20 @@ static esp_err_t board_io_expander_init(void)
         return ESP_ERR_INVALID_STATE;
     }
 
+    const int attempts = 3;
+    esp_err_t probe_err = ESP_FAIL;
     ch422_probe_result_t probe = {0};
-    esp_err_t probe_err = ch422_probe(&probe);
-    ch422_log_probe_result(&probe);
+    for (int attempt = 1; attempt <= attempts; ++attempt) {
+        probe_err = ch422_probe(&probe);
+        ch422_log_probe_result(&probe);
+        if (probe_err == ESP_OK) {
+            break;
+        }
+        if (attempt < attempts) {
+            ESP_LOGW(TAG_CH422, "CH422G probe failed (attempt %d/%d): %s", attempt, attempts, esp_err_to_name(probe_err));
+            vTaskDelay(pdMS_TO_TICKS(20 * attempt));
+        }
+    }
 
     if (probe_err != ESP_OK) {
 #if CONFIG_BOARD_REQUIRE_CH422G
@@ -617,13 +658,13 @@ static esp_err_t board_touch_init(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (!s_board_has_expander) {
-        ESP_LOGW(TAG_TOUCH, "Skipping touch init: IO expander unavailable");
-        return ESP_ERR_INVALID_STATE;
+    bool can_reset = s_board_has_expander;
+    if (!can_reset) {
+        ESP_LOGW(TAG_TOUCH, "IO expander unavailable, probing GT911 without reset");
     }
 
     uint8_t gt911_addr = ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS;
-    ESP_RETURN_ON_ERROR(gt911_detect_i2c_addr(&gt911_addr), TAG_TOUCH, "GT911 detection failed");
+    ESP_RETURN_ON_ERROR(gt911_detect_i2c_addr(&gt911_addr, can_reset), TAG_TOUCH, "GT911 detection failed");
 
     esp_lcd_panel_io_handle_t io_handle = NULL;
     esp_lcd_panel_io_i2c_config_t io_conf = {
@@ -666,35 +707,35 @@ static esp_err_t board_touch_init(void)
     return err;
 }
 
-static esp_err_t gt911_detect_i2c_addr(uint8_t *addr_out)
+static esp_err_t gt911_detect_i2c_addr(uint8_t *addr_out, bool can_reset)
 {
     ESP_RETURN_ON_FALSE(addr_out, ESP_ERR_INVALID_ARG, TAG_TOUCH, "GT911 addr_out is NULL");
-
-    if (!s_board_has_expander) {
-        ESP_LOGE(TAG_TOUCH, "GT911 detection requires IO expander (TP_RST via EXIO1)");
-        return ESP_ERR_INVALID_STATE;
-    }
 
     const uint8_t candidates[] = {0x5D, 0x14};
     bool detected = false;
 
-    for (int attempt = 0; attempt < 2 && !detected; ++attempt) {
+    int max_attempts = can_reset ? 2 : 1;
+    for (int attempt = 0; attempt < max_attempts && !detected; ++attempt) {
         bool int_level = (attempt == 0);
         gpio_config_t int_cfg = {
             .pin_bit_mask = BIT64(BOARD_TOUCH_INT),
-            .mode = GPIO_MODE_OUTPUT,
+            .mode = can_reset ? GPIO_MODE_OUTPUT : GPIO_MODE_INPUT,
             .pull_up_en = GPIO_PULLUP_DISABLE,
             .pull_down_en = GPIO_PULLDOWN_DISABLE,
             .intr_type = GPIO_INTR_DISABLE,
         };
 
         ESP_RETURN_ON_ERROR(gpio_config(&int_cfg), TAG_TOUCH, "GT911 INT config failed (attempt %d)", attempt + 1);
-        ESP_RETURN_ON_ERROR(gpio_set_level(BOARD_TOUCH_INT, int_level), TAG_TOUCH, "GT911 INT drive failed");
+        if (can_reset) {
+            ESP_RETURN_ON_ERROR(gpio_set_level(BOARD_TOUCH_INT, int_level), TAG_TOUCH, "GT911 INT drive failed");
 
-        ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_TOUCH_RST, false), TAG_TOUCH, "GT911 reset low failed");
-        vTaskDelay(pdMS_TO_TICKS(10));
-        ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_TOUCH_RST, true), TAG_TOUCH, "GT911 reset high failed");
-        vTaskDelay(pdMS_TO_TICKS(80));
+            ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_TOUCH_RST, false), TAG_TOUCH, "GT911 reset low failed");
+            vTaskDelay(pdMS_TO_TICKS(10));
+            ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_TOUCH_RST, true), TAG_TOUCH, "GT911 reset high failed");
+            vTaskDelay(pdMS_TO_TICKS(80));
+        } else if (attempt == 0) {
+            ESP_LOGW(TAG_TOUCH, "GT911 reset skipped: IO expander unavailable, probing passive state");
+        }
 
         ESP_LOGI(TAG_TOUCH, "GT911 detect attempt %d: TP_IRQ=%d, probing 0x5D/0x14", attempt + 1, int_level);
         for (size_t i = 0; i < sizeof(candidates); ++i) {
@@ -719,8 +760,8 @@ static esp_err_t gt911_detect_i2c_addr(uint8_t *addr_out)
     ESP_RETURN_ON_ERROR(gpio_config(&float_cfg), TAG_TOUCH, "GT911 INT restore to input failed");
 
     if (!detected) {
-        ESP_LOGE(TAG_TOUCH, "GT911 not found at 0x5D or 0x14 after both INT polarities");
-        return ESP_FAIL;
+        ESP_LOGE(TAG_TOUCH, "GT911 not found at 0x5D or 0x14 after probing%s", can_reset ? " with resets" : "");
+        return ESP_ERR_NOT_FOUND;
     }
 
     return ESP_OK;

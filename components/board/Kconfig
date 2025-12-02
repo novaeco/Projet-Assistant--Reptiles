@@ -34,4 +34,20 @@ config BOARD_REQUIRE_CH422G
         the system degrades gracefully and disables peripherals that rely on
         the expander (touch, SD, backlight PWM, battery sense).
 
+config BOARD_REQUIRE_I2C_OK
+    bool "Abort boot if I2C bus is non-functional"
+    default n
+    help
+        When enabled, the firmware aborts at boot if the I2C self-test cannot
+        contact any of the expected peripherals (CH422G or GT911) or the bus
+        appears stuck. Disable to allow a degraded boot without I2C devices.
+
+config BOARD_I2C_ENABLE_INTERNAL_PULLUP
+    bool "Enable internal pull-ups on I2C pins"
+    default y
+    help
+        Enable the ESP32-S3 internal pull-ups on SDA/SCL when configuring the
+        master bus. Disable if strong external pull-ups are present and you
+        want to minimize biasing, or for debugging suspected pull-up issues.
+
 endmenu
