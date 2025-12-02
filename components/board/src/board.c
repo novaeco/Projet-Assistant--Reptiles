@@ -1,5 +1,6 @@
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 #include "board.h"
 #include "board_pins.h"
 #include "sdkconfig.h"
@@ -21,6 +22,7 @@
 #include "sdmmc_cmd.h"
 #include "reptile_storage.h"
 #include "esp_rom_sys.h"
+#include "esp_system.h"
 
 static const char *TAG = "BOARD";
 static const char *TAG_I2C = "BOARD_I2C";
@@ -40,9 +42,22 @@ static sdspi_dev_handle_t s_sdspi_handle = 0;
 static uint8_t s_batt_raw_empty = CONFIG_BOARD_BATTERY_RAW_EMPTY;
 static uint8_t s_batt_raw_full = CONFIG_BOARD_BATTERY_RAW_FULL;
 static bool s_sd_diag_hold_cs_low = false;
+static bool s_logged_expander_absent = false;
+static bool s_logged_batt_unavailable = false;
+
+typedef struct {
+    bool mode_ack;
+    bool input_ack;
+    bool out_low_ack;
+    bool out_high_ack;
+    int ack_count;
+    int expected_count;
+} ch422_probe_result_t;
 
 static void board_log_i2c_levels(const char *stage);
 static esp_err_t board_i2c_recover_bus(void);
+static esp_err_t ch422_probe(ch422_probe_result_t *result);
+static void ch422_log_probe_result(const ch422_probe_result_t *result);
 
 static esp_err_t board_load_battery_calibration(void)
 {
@@ -181,6 +196,71 @@ static esp_err_t sdspi_transaction_with_expander(sdspi_dev_handle_t handle, sdmm
 // I2C & IO Expander
 // =============================================================================
 
+static esp_err_t ch422_probe(ch422_probe_result_t *result)
+{
+    if (!result) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    memset(result, 0, sizeof(*result));
+    const struct {
+        uint8_t addr;
+        bool *flag;
+    } expected[] = {
+        {CH422_ADDR, &result->mode_ack},
+        {0x26, &result->input_ack},
+        {0x38, &result->out_low_ack},
+        {0x23, &result->out_high_ack},
+    };
+
+    result->expected_count = (int)(sizeof(expected) / sizeof(expected[0]));
+
+    for (size_t i = 0; i < sizeof(expected) / sizeof(expected[0]); ++i) {
+        esp_err_t err = i2c_master_probe(s_i2c_bus_handle, expected[i].addr, pdMS_TO_TICKS(50));
+        if (err == ESP_OK) {
+            ++result->ack_count;
+            *(expected[i].flag) = true;
+        }
+    }
+
+    if (!result->mode_ack) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    if (result->ack_count < result->expected_count) {
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    return ESP_OK;
+}
+
+static void ch422_log_probe_result(const ch422_probe_result_t *result)
+{
+    if (!result) {
+        return;
+    }
+
+    if (result->ack_count == 0) {
+        ESP_LOGE(TAG_CH422, "CH422G not detected: no ACK on expected addresses (0x23/0x24/0x26/0x38)");
+        ESP_LOGW(TAG_CH422, "Check IO expander power, I2C pull-ups, and reset wiring.");
+        return;
+    }
+
+    ESP_LOGI(TAG_CH422, "CH422G probe: MODE=%s INPUT=%s OUT_LOW=%s OUT_HIGH=%s (ack %d/%d)",
+             result->mode_ack ? "ACK" : "NACK",
+             result->input_ack ? "ACK" : "NACK",
+             result->out_low_ack ? "ACK" : "NACK",
+             result->out_high_ack ? "ACK" : "NACK",
+             result->ack_count, result->expected_count);
+
+    if (!result->mode_ack) {
+        ESP_LOGE(TAG_CH422, "CH422G MODE register not responding at 0x24");
+    }
+    if (result->mode_ack && result->ack_count < result->expected_count) {
+        ESP_LOGW(TAG_CH422, "CH422G partially detected (missing registers). Output control may be unavailable.");
+    }
+}
+
 static esp_err_t board_i2c_init(void)
 {
     if (s_i2c_bus_handle) {
@@ -212,24 +292,51 @@ static void board_i2c_scan(void)
         return;
     }
 
-    const uint8_t probes[] = {CH422_ADDR, 0x5D, 0x14};
     int found = 0;
-    int missing = 0;
+    char line[128] = {0};
+    size_t line_len = 0;
 
-    ESP_LOGI(TAG_I2C, "Probing expected I2C devices (timeout 200ms)...");
-    for (size_t i = 0; i < sizeof(probes); ++i) {
-        uint8_t addr = probes[i];
-        esp_err_t err = i2c_master_probe(s_i2c_bus_handle, addr, pdMS_TO_TICKS(200));
+    ESP_LOGI(TAG_I2C, "Scanning I2C bus (0x03-0x77) @ %d Hz...", BOARD_I2C_FREQ_HZ);
+    for (uint8_t addr = 0x03; addr <= 0x77; ++addr) {
+        esp_err_t err = i2c_master_probe(s_i2c_bus_handle, addr, pdMS_TO_TICKS(20));
         if (err == ESP_OK) {
             ++found;
-            ESP_LOGI(TAG_I2C, "ACK 0x%02X", addr);
-        } else {
-            ++missing;
-            ESP_LOGW(TAG_I2C, "No response at 0x%02X (%s)", addr, esp_err_to_name(err));
+            int n = snprintf(line + line_len, sizeof(line) - line_len, "0x%02X ", addr);
+            if (n <= 0 || (size_t)n >= sizeof(line) - line_len) {
+                ESP_LOGI(TAG_I2C, "Found: %s", line);
+                line_len = 0;
+                line[0] = '\0';
+                n = snprintf(line + line_len, sizeof(line) - line_len, "0x%02X ", addr);
+            }
+            line_len += (size_t)n;
         }
     }
+    if (line_len > 0) {
+        ESP_LOGI(TAG_I2C, "Found: %s", line);
+    }
+    ESP_LOGI(TAG_I2C, "I2C scan complete: %d device(s) responded", found);
 
-    ESP_LOGI(TAG_I2C, "I2C probe summary: found=%d missing=%d", found, missing);
+    const struct {
+        uint8_t addr;
+        const char *label;
+    } expected[] = {
+        {CH422_ADDR, "CH422G MODE"},
+        {0x26, "CH422G INPUT"},
+        {0x38, "CH422G OUT_LOW"},
+        {0x23, "CH422G OUT_HIGH"},
+        {0x5D, "GT911 (alt1)"},
+        {0x14, "GT911 (alt2)"},
+    };
+
+    for (size_t i = 0; i < sizeof(expected) / sizeof(expected[0]); ++i) {
+        esp_err_t err = i2c_master_probe(s_i2c_bus_handle, expected[i].addr, pdMS_TO_TICKS(50));
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG_I2C, "ACK 0x%02X (%s)", expected[i].addr, expected[i].label);
+        } else {
+            ESP_LOGW(TAG_I2C, "No response at 0x%02X (%s): %s", expected[i].addr, expected[i].label,
+                      esp_err_to_name(err));
+        }
+    }
 }
 
 static esp_err_t ch422_add_device(void)
@@ -245,27 +352,56 @@ static esp_err_t ch422_add_device(void)
     return err;
 }
 
+static void ch422_release_handle(void)
+{
+    if (s_io_dev) {
+        i2c_master_bus_rm_device(s_io_dev);
+        s_io_dev = NULL;
+    }
+}
+
 static esp_err_t ch422_send_cmd(const uint8_t *payload, size_t len, const char *label)
 {
     ESP_RETURN_ON_FALSE(s_io_dev, ESP_ERR_INVALID_STATE, TAG_CH422, "%s handle not ready", label);
-    esp_err_t err = i2c_master_transmit(s_io_dev, payload, len, pdMS_TO_TICKS(200));
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG_CH422, "%s write failed: %s", label, esp_err_to_name(err));
-        return err;
+    const int attempts = 3;
+    esp_err_t err = ESP_FAIL;
+
+    for (int attempt = 1; attempt <= attempts; ++attempt) {
+        err = i2c_master_transmit(s_io_dev, payload, len, pdMS_TO_TICKS(100));
+        if (err == ESP_OK) {
+            break;
+        }
+
+        if (attempt < attempts) {
+            ESP_LOGW(TAG_CH422, "%s write failed (attempt %d/%d): %s", label, attempt, attempts, esp_err_to_name(err));
+            vTaskDelay(pdMS_TO_TICKS(20 * attempt));
+        } else {
+            ESP_LOGE(TAG_CH422, "%s write failed after %d attempts: %s", label, attempts, esp_err_to_name(err));
+        }
     }
-    return ESP_OK;
+    return err;
 }
 
 static esp_err_t ch422_read_inputs(uint8_t *value)
 {
     ESP_RETURN_ON_FALSE(s_io_dev, ESP_ERR_INVALID_STATE, TAG_CH422, "CH422 IN handle not ready");
     uint8_t cmd = CH422_CMD_IO_INPUT;
-    esp_err_t err = i2c_master_transmit_receive(s_io_dev, &cmd, 1, value, 1, pdMS_TO_TICKS(200));
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG_CH422, "CH422 IO_IN read failed: %s", esp_err_to_name(err));
-        return err;
+    const int attempts = 3;
+    esp_err_t err = ESP_FAIL;
+
+    for (int attempt = 1; attempt <= attempts; ++attempt) {
+        err = i2c_master_transmit_receive(s_io_dev, &cmd, 1, value, 1, pdMS_TO_TICKS(100));
+        if (err == ESP_OK) {
+            break;
+        }
+        if (attempt < attempts) {
+            ESP_LOGW(TAG_CH422, "CH422 IO_IN read failed (attempt %d/%d): %s", attempt, attempts, esp_err_to_name(err));
+            vTaskDelay(pdMS_TO_TICKS(20 * attempt));
+        } else {
+            ESP_LOGE(TAG_CH422, "CH422 IO_IN read failed after %d attempts: %s", attempts, esp_err_to_name(err));
+        }
     }
-    return ESP_OK;
+    return err;
 }
 
 static esp_err_t io_expander_apply_outputs(void)
@@ -317,20 +453,70 @@ static esp_err_t board_io_expander_init(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    ESP_RETURN_ON_ERROR(ch422_add_device(), TAG_CH422, "CH422 add failed");
+    ch422_probe_result_t probe = {0};
+    esp_err_t probe_err = ch422_probe(&probe);
+    ch422_log_probe_result(&probe);
+
+    if (probe_err != ESP_OK) {
+#if CONFIG_BOARD_REQUIRE_CH422G
+        esp_system_abort("CONFIG_BOARD_REQUIRE_CH422G enabled: IO expander missing or incomplete");
+#else
+        s_logged_expander_absent = true;
+        return probe_err;
+#endif
+    }
+
+    esp_err_t add_err = ch422_add_device();
+    if (add_err != ESP_OK) {
+        return add_err;
+    }
 
     // Configure System Parameter byte for IO extension + push-pull outputs (datasheet: SYS=0x7F expected by board)
     uint8_t sys_param = CH422_CMD_SYS_PARAM | 0x7F;
-    ESP_RETURN_ON_ERROR(ch422_send_cmd(&sys_param, 1, "CH422 SYS_PARAM"), TAG_CH422, "CH422 SYS_PARAM failed");
+    esp_err_t sys_err = ch422_send_cmd(&sys_param, 1, "CH422 SYS_PARAM");
+    if (sys_err != ESP_OK) {
+        ch422_release_handle();
+#if CONFIG_BOARD_REQUIRE_CH422G
+        esp_system_abort("IO expander SYS_PARAM write failed");
+#else
+        return sys_err;
+#endif
+    }
 
     // Default outputs high for inactive CS / released resets / power enables
     s_io_state = 0;
-    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_VDD, true), TAG_CH422, "CH422 LCD_VDD_EN set failed");
-    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_BK, true), TAG_CH422, "CH422 BK_EN set failed");
-    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_TOUCH_RST, true), TAG_CH422, "CH422 TP_RST set failed");
-    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_SD_CS, true), TAG_CH422, "CH422 SD_CS set failed");
-    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_CAN_USB, false), TAG_CH422, "CH422 CAN/USB mux set failed");
-    ESP_RETURN_ON_ERROR(io_expander_apply_outputs(), TAG_CH422, "CH422 outputs apply failed");
+    esp_err_t out_err = ESP_OK;
+    esp_err_t err_tmp = io_expander_set_output(IO_EXP_PIN_LCD_VDD, true);
+    if (err_tmp != ESP_OK && out_err == ESP_OK) { out_err = err_tmp; }
+    err_tmp = io_expander_set_output(IO_EXP_PIN_BK, true);
+    if (err_tmp != ESP_OK && out_err == ESP_OK) { out_err = err_tmp; }
+    err_tmp = io_expander_set_output(IO_EXP_PIN_TOUCH_RST, true);
+    if (err_tmp != ESP_OK && out_err == ESP_OK) { out_err = err_tmp; }
+    err_tmp = io_expander_set_output(IO_EXP_PIN_SD_CS, true);
+    if (err_tmp != ESP_OK && out_err == ESP_OK) { out_err = err_tmp; }
+    err_tmp = io_expander_set_output(IO_EXP_PIN_CAN_USB, false);
+    if (err_tmp != ESP_OK && out_err == ESP_OK) { out_err = err_tmp; }
+
+    if (out_err != ESP_OK) {
+        ESP_LOGE(TAG_CH422, "CH422G output staging failed: %s", esp_err_to_name(out_err));
+        ch422_release_handle();
+#if CONFIG_BOARD_REQUIRE_CH422G
+        esp_system_abort("IO expander outputs could not be applied");
+#else
+        return out_err;
+#endif
+    }
+
+    esp_err_t apply_err = io_expander_apply_outputs();
+    if (apply_err != ESP_OK) {
+        ch422_release_handle();
+#if CONFIG_BOARD_REQUIRE_CH422G
+        esp_system_abort("IO expander outputs apply failed");
+#else
+        return apply_err;
+#endif
+    }
+
     s_board_has_expander = true;
     ESP_LOGI(TAG_CH422, "CH422G init OK, IO_OUT=0x%02X", (uint8_t)(s_io_state & 0xFF));
 
@@ -559,7 +745,10 @@ esp_err_t board_mount_sdcard(void)
 #endif
 
     if (!s_board_has_expander) {
-        ESP_LOGW(TAG_SD, "Skipping SD mount: IO expander unavailable for CS control");
+        if (!s_logged_expander_absent) {
+            ESP_LOGW(TAG_SD, "Skipping SD mount: IO expander unavailable for CS control");
+            s_logged_expander_absent = true;
+        }
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -710,7 +899,7 @@ esp_err_t board_init(void)
                  (unsigned)s_batt_raw_empty,
                  (unsigned)s_batt_raw_full,
                  batt_pct);
-    } else {
+    } else if (batt_err != ESP_ERR_INVALID_STATE) {
         ESP_LOGW(TAG, "Battery read failed: %s", esp_err_to_name(batt_err));
     }
 
@@ -790,7 +979,10 @@ esp_err_t board_get_battery_level(uint8_t *percent, uint8_t *raw)
     }
 
     if (!s_board_has_expander) {
-        ESP_LOGW(TAG_CH422, "Battery sense unavailable: IO expander not initialized");
+        if (!s_logged_batt_unavailable) {
+            ESP_LOGW(TAG_CH422, "Battery sense unavailable: IO expander not initialized");
+            s_logged_batt_unavailable = true;
+        }
         return ESP_ERR_INVALID_STATE;
     }
 

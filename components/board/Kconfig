@@ -24,4 +24,14 @@ config BOARD_SD_HOLD_CS_LOW_DIAG
         transactions. Useful for diagnosing CS gating/timeout issues coming from
         the IO expander. Disable for normal operation.
 
+config BOARD_REQUIRE_CH422G
+    bool "Abort boot if CH422G IO expander is missing"
+    default n
+    help
+        When enabled, the firmware aborts at boot if the CH422G IO expander
+        does not acknowledge all expected I2C addresses or if initialization
+        (SYS_PARAM write, output staging) fails. When disabled (default),
+        the system degrades gracefully and disables peripherals that rely on
+        the expander (touch, SD, backlight PWM, battery sense).
+
 endmenu
