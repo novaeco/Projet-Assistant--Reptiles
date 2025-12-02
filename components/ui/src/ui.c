@@ -14,6 +14,9 @@
 #include "reptile_storage.h"
 #include "esp_heap_caps.h"
 
+esp_err_t esp_lcd_touch_get_data(esp_lcd_touch_handle_t tp, uint16_t *x, uint16_t *y, uint16_t *strength,
+                                 uint8_t *point_num, uint8_t max_point_num) __attribute__((weak));
+
 static const char *TAG = "UI";
 
 // LVGL Task Parameters
@@ -82,9 +85,15 @@ static void ui_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
         uint16_t touch_y[1];
         uint8_t touch_cnt = 0;
 
-        // Read touch data
         esp_lcd_touch_read_data(s_touch_handle);
-        bool pressed = esp_lcd_touch_get_coordinates(s_touch_handle, touch_x, touch_y, NULL, &touch_cnt, 1);
+        bool pressed = false;
+        esp_err_t err = ESP_OK;
+        if (esp_lcd_touch_get_data) {
+            err = esp_lcd_touch_get_data(s_touch_handle, touch_x, touch_y, NULL, &touch_cnt, 1);
+            pressed = (err == ESP_OK && touch_cnt > 0);
+        } else {
+            pressed = esp_lcd_touch_get_coordinates(s_touch_handle, touch_x, touch_y, NULL, &touch_cnt, 1);
+        }
 
         if (pressed && touch_cnt > 0) {
             data->point.x = touch_x[0];

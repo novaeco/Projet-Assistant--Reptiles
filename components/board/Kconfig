@@ -50,6 +50,14 @@ config BOARD_I2C_ENABLE_INTERNAL_PULLUP
         master bus. Disable if strong external pull-ups are present and you
         want to minimize biasing, or for debugging suspected pull-up issues.
 
+config BOARD_I2C_FULL_SCAN_DEBUG
+    bool "Perform full I2C scan in debug builds"
+    default n
+    help
+        When enabled, the board driver performs a full 0x03-0x77 I2C scan after
+        the targeted probe. This can generate verbose timeout logs from the
+        I2C driver and is intended only for deep debugging.
+
 choice BOARD_IOEXP_DRIVER
     prompt "IO expander driver"
     default BOARD_IOEXP_DRIVER_WAVESHARE
