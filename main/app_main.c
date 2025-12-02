@@ -34,9 +34,15 @@ void app_main(void)
 
     // 2. Initialize Board (GPIO, Power, LCD, Touch, SD Card mounting)
     ESP_LOGI(TAG, "Bringing up board peripherals (LCD, touch, SD, IO expander)...");
-    ESP_ERROR_CHECK(board_init());
+    esp_err_t board_err = board_init();
+    if (board_err != ESP_OK) {
+        ESP_LOGE(TAG, "Board init completed with errors: %s", esp_err_to_name(board_err));
+    }
 
-    // Restore backlight level if saved
+    ESP_LOGI(TAG, "board features enabled: expander=%d touch=%d sd=%d lcd=%d",
+             board_has_io_expander(), board_touch_is_ready(), board_sd_is_mounted(), board_lcd_is_ready());
+
+    // Restore backlight level if saved (requires IO expander)
     int32_t backlight_pct = 100;
     if (storage_nvs_get_i32("backlight_pct", &backlight_pct) == ESP_OK) {
         if (backlight_pct < 0) {
@@ -45,7 +51,10 @@ void app_main(void)
             backlight_pct = 100;
         }
     }
-    board_set_backlight_percent((uint8_t)backlight_pct);
+    esp_err_t bk_err = board_set_backlight_percent((uint8_t)backlight_pct);
+    if (bk_err != ESP_OK) {
+        ESP_LOGW(TAG, "Backlight restore skipped: %s", esp_err_to_name(bk_err));
+    }
 
     // 3. Initialize Network (WiFi Stack, SNTP)
     ESP_LOGI(TAG, "Starting network stack (netif/event loop/Wi-Fi/SNTP)...");

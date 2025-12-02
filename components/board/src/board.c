@@ -37,6 +37,7 @@ static i2c_master_dev_handle_t s_io_dev_in = NULL;
 static i2c_master_dev_handle_t s_io_dev_out_low = NULL;
 static i2c_master_dev_handle_t s_io_dev_out_high = NULL;
 static bool s_board_has_expander = false;
+static bool s_board_has_lcd = false;
 static uint16_t s_io_state = 0;
 static sdspi_dev_handle_t s_sdspi_handle = 0;
 static uint8_t s_batt_raw_empty = CONFIG_BOARD_BATTERY_RAW_EMPTY;
@@ -406,10 +407,25 @@ static esp_err_t board_lcd_init(void)
         .flags.fb_in_psram = 1, // Allocate frame buffer in PSRAM
     };
 
-    ESP_ERROR_CHECK(esp_lcd_new_rgb_panel(&panel_config, &s_lcd_panel_handle));
-    ESP_ERROR_CHECK(esp_lcd_panel_reset(s_lcd_panel_handle));
-    ESP_ERROR_CHECK(esp_lcd_panel_init(s_lcd_panel_handle));
+    esp_err_t err = esp_lcd_new_rgb_panel(&panel_config, &s_lcd_panel_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "RGB panel create failed: %s", esp_err_to_name(err));
+        return err;
+    }
 
+    err = esp_lcd_panel_reset(s_lcd_panel_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "RGB panel reset failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    err = esp_lcd_panel_init(s_lcd_panel_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "RGB panel init failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    s_board_has_lcd = true;
     return ESP_OK;
 }
 
@@ -446,7 +462,12 @@ static esp_err_t board_touch_init(void)
             .disable_control_phase = 1,
         },
     };
-    ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(s_i2c_bus_handle, &io_conf, &io_handle));
+
+    esp_err_t err = esp_lcd_new_panel_io_i2c(s_i2c_bus_handle, &io_conf, &io_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG_TOUCH, "GT911 panel IO create failed: %s", esp_err_to_name(err));
+        return err;
+    }
 
     esp_lcd_touch_config_t tp_cfg = {
         .x_max = BOARD_LCD_H_RES,
@@ -457,7 +478,7 @@ static esp_err_t board_touch_init(void)
         .flags = {.swap_xy = 0, .mirror_x = 0, .mirror_y = 0},
     };
 
-    esp_err_t err = esp_lcd_touch_new_i2c_gt911(io_handle, &tp_cfg, &s_touch_handle);
+    err = esp_lcd_touch_new_i2c_gt911(io_handle, &tp_cfg, &s_touch_handle);
     if (err == ESP_OK) {
         ESP_LOGI(TAG_TOUCH, "GT911 init OK on I2C addr 0x%02X, INT=%d", gt911_addr, BOARD_TOUCH_INT);
         esp_lcd_touch_read_data(s_touch_handle);
@@ -651,23 +672,39 @@ esp_err_t board_mount_sdcard(void)
 
 esp_err_t board_init(void)
 {
-    ESP_ERROR_CHECK(board_i2c_init());
+    esp_err_t status = ESP_OK;
+
+    esp_err_t i2c_err = board_i2c_init();
+    if (i2c_err != ESP_OK) {
+        ESP_LOGE(TAG_I2C, "I2C init failed: %s (continuing with limited features)", esp_err_to_name(i2c_err));
+        status = i2c_err;
+    }
+
     esp_err_t expander_err = board_io_expander_init();
     if (expander_err != ESP_OK) {
         s_board_has_expander = false;
         ESP_LOGE(TAG_CH422, "IO expander init failed: %s (continuing without EXIO)", esp_err_to_name(expander_err));
+        status = (status == ESP_OK) ? expander_err : status;
     }
-    ESP_ERROR_CHECK(board_lcd_init());
+
+    esp_err_t lcd_err = board_lcd_init();
+    if (lcd_err != ESP_OK) {
+        ESP_LOGE(TAG, "LCD init failed: %s", esp_err_to_name(lcd_err));
+        status = (status == ESP_OK) ? lcd_err : status;
+    }
 
     esp_err_t touch_err = board_touch_init();
     if (touch_err != ESP_OK) {
         ESP_LOGW(TAG_TOUCH, "Touch init failed: %s (touch disabled)", esp_err_to_name(touch_err));
         s_touch_handle = NULL;
+        status = (status == ESP_OK) ? touch_err : status;
     }
 
     esp_err_t sd_err = board_mount_sdcard();
     if (sd_err != ESP_OK) {
         ESP_LOGW(TAG_SD, "SD card not mounted: %s", esp_err_to_name(sd_err));
+        s_card = NULL;
+        status = (status == ESP_OK) ? sd_err : status;
     }
 
     esp_err_t calib_err = board_load_battery_calibration();
@@ -688,7 +725,7 @@ esp_err_t board_init(void)
         ESP_LOGW(TAG, "Battery read failed: %s", esp_err_to_name(batt_err));
     }
 
-    return ESP_OK;
+    return status;
 }
 
 esp_err_t board_set_backlight_percent(uint8_t percent)
@@ -818,5 +855,25 @@ esp_lcd_panel_handle_t board_get_lcd_handle(void)
 esp_lcd_touch_handle_t board_get_touch_handle(void)
 {
     return s_touch_handle;
+}
+
+bool board_has_io_expander(void)
+{
+    return s_board_has_expander;
+}
+
+bool board_touch_is_ready(void)
+{
+    return s_touch_handle != NULL;
+}
+
+bool board_sd_is_mounted(void)
+{
+    return s_card != NULL;
+}
+
+bool board_lcd_is_ready(void)
+{
+    return s_board_has_lcd;
 }
 
