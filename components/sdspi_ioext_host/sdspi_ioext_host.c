@@ -93,14 +93,14 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t
     slot.gpio_int = SDSPI_SLOT_NO_INT;
 
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    if (config->slot_config.clock_speed_hz != 0) {
-        host.max_freq_khz = config->slot_config.clock_speed_hz / 1000;
+    if (config->max_freq_khz) {
+        host.max_freq_khz = config->max_freq_khz;
     }
 
-    host.slot = NULL;
+    host.slot = spi_host;
     host.do_transaction = sdspi_ioext_do_transaction;
 
-    sdspi_dev_handle_t device = NULL;
+    sdspi_dev_handle_t device = 0;
     err = sdspi_host_init_device(&slot, &device);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "SDSPI device init failed: %s", esp_err_to_name(err));
@@ -114,8 +114,6 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t
     s_ctx.cs_hold_delay_us = config->cs_hold_delay_us;
     s_ctx.initial_clocks = config->initial_clocks ? config->initial_clocks : 80;
     s_ctx.sent_initial_clocks = false;
-
-    host.slot = device;
 
     *host_out = host;
     *device_out = device;
