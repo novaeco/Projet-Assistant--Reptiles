@@ -830,20 +830,19 @@ esp_err_t board_mount_sdcard(void)
             continue;
         }
 
-        ESP_LOGI(TAG_SD, "SDSPI device handle=%p host.slot=%p (attempt=%d)", (void *)s_sdspi_handle,
-                 (void *)(intptr_t)host.slot, (int)(attempt + 1));
+        ESP_LOGI(TAG_SD, "SDSPI device handle=%d host.slot=%d (attempt=%d)", (int)s_sdspi_handle, host.slot,
+                 (int)(attempt + 1));
 
-        if (host.slot != (int)(intptr_t)s_sdspi_handle) {
-            ESP_LOGE(TAG_SD, "Host slot/device mismatch (host.slot=%p device=%p)", (void *)(intptr_t)host.slot,
-                     (void *)s_sdspi_handle);
+        if (host.slot != (int)s_sdspi_handle) {
+            ESP_LOGE(TAG_SD, "Host slot/device mismatch (host.slot=%d device=%d)", host.slot, (int)s_sdspi_handle);
             ret = ESP_ERR_INVALID_STATE;
             sdspi_ioext_host_deinit(s_sdspi_handle, BOARD_SD_SPI_HOST, false);
             s_sdspi_handle = 0;
             continue;
         }
 
-        ESP_LOGI(TAG_SD, "SDSPI host prepared (spi_host=%d, device=%p, host.slot=%p, target_freq=%dkHz)",
-                 BOARD_SD_SPI_HOST, (void *)s_sdspi_handle, (void *)host.slot, host.max_freq_khz);
+        ESP_LOGI(TAG_SD, "SDSPI host prepared (spi_host=%d, device=%d, host.slot=%d, target_freq=%dkHz)",
+                 BOARD_SD_SPI_HOST, (int)s_sdspi_handle, host.slot, host.max_freq_khz);
 
         ESP_LOGI(TAG_SD, "SD attempt %d/%d @ %dkHz (MISO=%d MOSI=%d SCLK=%d CS=EXIO%u)",
                  (int)(attempt + 1), (int)max_attempts, freq_table_khz[attempt],
@@ -861,6 +860,30 @@ esp_err_t board_mount_sdcard(void)
                 ESP_LOGW(TAG_SD, "stat(%s) failed: %s", mount_point, strerror(errno));
             }
 
+            const char *rw_path = "/sdcard/test.txt";
+            const char *rw_payload = "ok";
+            FILE *rw = fopen(rw_path, "w");
+            if (rw) {
+                fwrite(rw_payload, 1, strlen(rw_payload), rw);
+                fclose(rw);
+                ESP_LOGI(TAG_SD, "Wrote validation payload to %s", rw_path);
+                rw = fopen(rw_path, "r");
+                if (rw) {
+                    char buf[8] = {0};
+                    size_t n = fread(buf, 1, sizeof(buf) - 1, rw);
+                    fclose(rw);
+                    if (n == strlen(rw_payload) && strncmp(buf, rw_payload, strlen(rw_payload)) == 0) {
+                        ESP_LOGI(TAG_SD, "Validated SD readback from %s (%s)", rw_path, buf);
+                    } else {
+                        ESP_LOGW(TAG_SD, "Readback mismatch from %s (got %zu bytes: %s)", rw_path, n, buf);
+                    }
+                } else {
+                    ESP_LOGW(TAG_SD, "Failed to reopen %s for read: %s", rw_path, strerror(errno));
+                }
+            } else {
+                ESP_LOGW(TAG_SD, "Failed to create %s: %s", rw_path, strerror(errno));
+            }
+
             DIR *dir = opendir(mount_point);
             if (dir) {
                 ESP_LOGI(TAG_SD, "Listing %s (up to 5 entries):", mount_point);
@@ -873,17 +896,6 @@ esp_err_t board_mount_sdcard(void)
                 closedir(dir);
             } else {
                 ESP_LOGW(TAG_SD, "opendir(%s) failed: %s", mount_point, strerror(errno));
-            }
-
-            const char *probe_path = "/sdcard/.board_sd_mountcheck";
-            FILE *probe = fopen(probe_path, "w");
-            if (probe) {
-                const char *probe_msg = "sd mount ok\n";
-                fwrite(probe_msg, 1, strlen(probe_msg), probe);
-                fclose(probe);
-                ESP_LOGI(TAG_SD, "Created mount probe file %s", probe_path);
-            } else {
-                ESP_LOGW(TAG_SD, "Failed to create probe file %s: %s", probe_path, strerror(errno));
             }
 
             return ESP_OK;
