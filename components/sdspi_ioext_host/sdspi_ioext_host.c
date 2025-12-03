@@ -41,6 +41,8 @@ static sdspi_ioext_context_t *sdspi_ioext_get_ctx(intptr_t slot)
     for (int i = 0; i < SDSPI_IOEXT_MAX_HOSTS; ++i) {
         sdspi_ioext_context_t *ctx = &s_ctx[i];
         if (ctx->in_use && ctx->slot_handle == slot) {
+            ESP_LOGD(TAG, "Resolved ctx index=%d host=%d device=%p for slot=%p", i, ctx->host_id,
+                     (void *)ctx->device, (void *)slot);
             return ctx;
         }
     }
@@ -152,6 +154,7 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t
     esp_err_t err = ESP_OK;
 
     if (config->bus_cfg) {
+        // Mandatory order: initialize SPI bus prior to creating the SDSPI device handle
         err = spi_bus_initialize(spi_host, config->bus_cfg, SDSPI_DEFAULT_DMA);
         if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
             ESP_LOGE(TAG, "SPI bus init failed: %s", esp_err_to_name(err));
@@ -163,14 +166,21 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t
         }
     }
 
-    sdspi_device_config_t slot = {0};
-    slot = config->slot_config;
-    slot.host_id = spi_host;
-    slot.gpio_cs = SDSPI_SLOT_NO_CS;
-    slot.gpio_int = SDSPI_SLOT_NO_INT;
+    sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
+    slot_config = config->slot_config;
+    slot_config.host_id = spi_host;
+    slot_config.gpio_cs = SDSPI_SLOT_NO_CS; // CS is driven externally through IO expander
+    slot_config.gpio_int = SDSPI_SLOT_NO_INT;
+
+    if (slot_config.cs_setup_delay_us == 0) {
+        slot_config.cs_setup_delay_us = config->cs_setup_delay_us;
+    }
+    if (slot_config.cs_hold_delay_us == 0) {
+        slot_config.cs_hold_delay_us = config->cs_hold_delay_us;
+    }
 
     sdspi_dev_handle_t device = 0;
-    err = sdspi_host_init_device(&slot, &device);
+    err = sdspi_host_init_device(&slot_config, &device);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "SDSPI device init failed: %s", esp_err_to_name(err));
         return err;
@@ -181,7 +191,7 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t
         host.max_freq_khz = config->max_freq_khz;
     }
 
-    host.slot = (int)(intptr_t)device;
+    host.slot = (int)(intptr_t)device; // propagate SDSPI device handle to the SDMMC layer
     host.do_transaction = sdspi_ioext_do_transaction;
 
     spi_device_interface_config_t clock_if_cfg = {
@@ -212,8 +222,8 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t
     ctx->clock_dev = clock_dev;
     ctx->set_cs_cb = config->set_cs_cb;
     ctx->cs_user_ctx = config->cs_user_ctx;
-    ctx->cs_setup_delay_us = config->cs_setup_delay_us;
-    ctx->cs_hold_delay_us = config->cs_hold_delay_us;
+    ctx->cs_setup_delay_us = (config->cs_setup_delay_us ? config->cs_setup_delay_us : slot_config.cs_setup_delay_us);
+    ctx->cs_hold_delay_us = (config->cs_hold_delay_us ? config->cs_hold_delay_us : slot_config.cs_hold_delay_us);
     ctx->initial_clocks = config->initial_clocks ? config->initial_clocks : 80;
     ctx->sent_initial_clocks = false;
     ctx->host_id = spi_host;
@@ -226,8 +236,9 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t
 
     *host_out = host;
     *device_out = device;
-    ESP_LOGI(TAG, "sdspi_ioext: init done, host=%d device=%p slot=%p, freq=%ukHz, CS via IO expander", spi_host,
-             (void *)device, (void *)host.slot, host.max_freq_khz);
+    ESP_LOGI(TAG, "sdspi_ioext: init done host=%d device_handle=%p host.slot=%p freq=%ukHz cs_setup=%uus cs_hold=%uus",
+             spi_host, (void *)device, (void *)host.slot, host.max_freq_khz,
+             (unsigned)ctx->cs_setup_delay_us, (unsigned)ctx->cs_hold_delay_us);
     return err;
 }
 

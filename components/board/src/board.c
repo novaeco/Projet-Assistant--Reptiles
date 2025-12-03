@@ -813,7 +813,7 @@ esp_err_t board_mount_sdcard(void)
     for (size_t attempt = 0; attempt < max_attempts; ++attempt) {
         sdspi_ioext_config_t ioext_cfg = {
             .spi_host = BOARD_SD_SPI_HOST,
-            .bus_cfg = NULL, // bus already initialized once above
+            .bus_cfg = (attempt == 0) ? &bus_cfg : NULL, // ensure first attempt initializes bus in correct order
             .slot_config = slot_config,
             .max_freq_khz = freq_table_khz[attempt],
             .set_cs_cb = io_expander_sd_cs,
@@ -829,6 +829,9 @@ esp_err_t board_mount_sdcard(void)
             ESP_LOGW(TAG_SD, "SD host init failed @%dkHz: %s", freq_table_khz[attempt], esp_err_to_name(ret));
             continue;
         }
+
+        ESP_LOGI(TAG_SD, "SDSPI device handle=%p host.slot=%p (attempt=%d)", (void *)s_sdspi_handle,
+                 (void *)(intptr_t)host.slot, (int)(attempt + 1));
 
         if (host.slot != (int)(intptr_t)s_sdspi_handle) {
             ESP_LOGE(TAG_SD, "Host slot/device mismatch (host.slot=%p device=%p)", (void *)(intptr_t)host.slot,
@@ -870,6 +873,17 @@ esp_err_t board_mount_sdcard(void)
                 closedir(dir);
             } else {
                 ESP_LOGW(TAG_SD, "opendir(%s) failed: %s", mount_point, strerror(errno));
+            }
+
+            const char *probe_path = "/sdcard/.board_sd_mountcheck";
+            FILE *probe = fopen(probe_path, "w");
+            if (probe) {
+                const char *probe_msg = "sd mount ok\n";
+                fwrite(probe_msg, 1, strlen(probe_msg), probe);
+                fclose(probe);
+                ESP_LOGI(TAG_SD, "Created mount probe file %s", probe_path);
+            } else {
+                ESP_LOGW(TAG_SD, "Failed to create probe file %s: %s", probe_path, strerror(errno));
             }
 
             return ESP_OK;
