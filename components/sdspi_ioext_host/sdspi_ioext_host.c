@@ -373,10 +373,15 @@ esp_err_t sdspi_ioext_host_deinit(sdspi_dev_handle_t device, spi_host_device_t s
         if (ctx_lock && took_ctx_lock) {
             xSemaphoreGive(ctx_lock);
             vSemaphoreDelete(ctx_lock);
+    if (spi_host >= 0 && spi_host < SDSPI_IOEXT_MAX_HOSTS && sdspi_ioext_lock_ctx_array(portMAX_DELAY)) {
+        bus_owned = s_ctx[spi_host].bus_initialized;
+        if (s_ctx[spi_host].clock_dev) {
+            spi_bus_remove_device(s_ctx[spi_host].clock_dev);
         }
         if (ctx) {
             memset(ctx, 0, sizeof(*ctx));
         }
+        memset(&s_ctx[spi_host], 0, sizeof(s_ctx[spi_host]));
         sdspi_ioext_unlock_ctx_array();
     }
 
