@@ -25,41 +25,10 @@ static lv_display_t *s_disp = NULL;
 static lv_indev_t *s_indev = NULL;
 static esp_lcd_panel_handle_t s_panel_handle = NULL;
 static esp_lcd_touch_handle_t s_touch_handle = NULL;
-static int64_t s_flush_deadline_us = 0;
-static esp_timer_handle_t s_flush_timeout_timer = NULL;
 
 // =============================================================================
 // Flush Callback (Display)
 // =============================================================================
-
-// Callback from the RGB panel driver when a frame transfer is done
-static volatile bool s_vsync_fired = false;
-static volatile bool s_flush_waiting = false;
-static bool s_use_vsync = false;
-
-static void ui_flush_timeout_cb(void *arg)
-{
-    lv_display_t *disp = (lv_display_t *)arg;
-    if (s_flush_waiting) {
-        s_flush_waiting = false;
-        ESP_LOGE(TAG, "LVGL flush timeout -> force ready");
-        lv_display_flush_ready(disp);
-    }
-}
-
-static bool IRAM_ATTR on_vsync_event(esp_lcd_panel_handle_t panel, const esp_lcd_rgb_panel_event_data_t *event_data, void *user_data)
-{
-    (void)panel;
-    (void)event_data;
-    lv_display_t *disp = (lv_display_t *)user_data;
-    s_vsync_fired = true;
-    if (s_flush_waiting && disp) {
-        s_flush_waiting = false;
-        lv_display_flush_ready(disp);
-        ESP_EARLY_LOGD(TAG, "flush_ready from VSYNC");
-    }
-    return false;
-}
 
 static void ui_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
@@ -76,21 +45,9 @@ static void ui_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_m
 
     esp_lcd_panel_draw_bitmap(s_panel_handle, x1, y1, x2, y2, px_map);
     ESP_LOGD(TAG, "flush_cb area x%d-%d y%d-%d", x1, x2 - 1, y1, y2 - 1);
-    s_vsync_fired = false;
-    s_flush_waiting = true;
-    // Set a safety deadline in case VSYNC never triggers (avoid WDT lockup)
-    s_flush_deadline_us = esp_timer_get_time() + 20000; // 20ms deadline
-    if (s_flush_timeout_timer) {
-        esp_timer_stop(s_flush_timeout_timer);
-        esp_timer_start_once(s_flush_timeout_timer, 20000);
-    }
 
-    // If vsync callback registration failed, complete immediately
-    if (!s_use_vsync) {
-        s_flush_waiting = false;
-        lv_display_flush_ready(disp);
-        ESP_LOGD(TAG, "flush_cb immediate ready (no vsync)");
-    }
+    // Continuous-refresh RGB panel: signal LVGL immediately to avoid timeouts
+    lv_display_flush_ready(disp);
 }
 
 // =============================================================================
@@ -176,32 +133,7 @@ esp_err_t ui_init(void)
     lv_display_set_user_data(s_disp, s_panel_handle);
     lv_display_set_flush_cb(s_disp, ui_flush_cb);
 
-    // 4. Register VSync Callback for Flush Ready
-    // We register it AFTER creating s_disp so we can pass it as user_data
-    esp_lcd_rgb_panel_event_callbacks_t callbacks = {
-        .on_vsync = on_vsync_event,
-    };
-#ifdef CONFIG_LCD_RGB_ISR_IRAM_SAFE
-    esp_err_t cb_err = esp_lcd_rgb_panel_register_event_callbacks(s_panel_handle, &callbacks, s_disp);
-    if (cb_err != ESP_OK) {
-        ESP_LOGW(TAG, "VSync callback registration failed: %s (continuing without IRAM callback)", esp_err_to_name(cb_err));
-        s_use_vsync = false;
-    } else {
-        s_use_vsync = true;
-    }
-#else
-        ESP_LOGW(TAG, "RGB ISR IRAM safety disabled in sdkconfig; skipping vsync callback registration.");
-        s_use_vsync = false;
-#endif
-
-    const esp_timer_create_args_t flush_timeout_args = {
-        .callback = ui_flush_timeout_cb,
-        .name = "lvgl_flush_to",
-        .arg = s_disp,
-    };
-    ESP_ERROR_CHECK(esp_timer_create(&flush_timeout_args, &s_flush_timeout_timer));
-
-    // 5. Set Buffers (Direct Mode with RGB Panel Buffers)
+    // 4. Set Buffers (Direct Mode with RGB Panel Buffers)
     void *buf1 = NULL;
     void *buf2 = NULL;
     ESP_ERROR_CHECK(esp_lcd_rgb_panel_get_frame_buffer(s_panel_handle, 2, &buf1, &buf2));
