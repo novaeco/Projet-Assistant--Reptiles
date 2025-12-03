@@ -4,6 +4,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <stdint.h>
 #include "board.h"
 #include "board_pins.h"
 #include "sdkconfig.h"
@@ -826,6 +827,15 @@ esp_err_t board_mount_sdcard(void)
         ret = sdspi_ioext_host_init(&ioext_cfg, &host, &s_sdspi_handle);
         if (ret != ESP_OK) {
             ESP_LOGW(TAG_SD, "SD host init failed @%dkHz: %s", freq_table_khz[attempt], esp_err_to_name(ret));
+            continue;
+        }
+
+        if (host.slot != (int)(intptr_t)s_sdspi_handle) {
+            ESP_LOGE(TAG_SD, "Host slot/device mismatch (host.slot=%p device=%p)", (void *)(intptr_t)host.slot,
+                     (void *)s_sdspi_handle);
+            ret = ESP_ERR_INVALID_STATE;
+            sdspi_ioext_host_deinit(s_sdspi_handle, BOARD_SD_SPI_HOST, false);
+            s_sdspi_handle = 0;
             continue;
         }
 
