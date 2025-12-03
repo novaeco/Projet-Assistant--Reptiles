@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esp_err.h"
+#include "driver/sdmmc_host.h"
 #include "driver/sdspi_host.h"
 #include "driver/spi_master.h"
 
