@@ -5,6 +5,7 @@
 #include "esp_log.h"
 #include "esp_rom_sys.h"
 #include "soc/soc_caps.h"
+#include "driver/spi_common.h"
 #include "freertos/semphr.h"
 
 static const char *TAG = "sdspi_ioext";
@@ -23,13 +24,22 @@ typedef struct {
     SemaphoreHandle_t lock;
 } sdspi_ioext_context_t;
 
-static sdspi_ioext_context_t s_ctx[SOC_SPI_HOST_NUM] = {0};
+#if defined(SOC_SPI_PERIPH_NUM)
+#define SDSPI_IOEXT_MAX_HOSTS (SOC_SPI_PERIPH_NUM)
+#elif defined(SPI_HOST_MAX)
+#define SDSPI_IOEXT_MAX_HOSTS (SPI_HOST_MAX)
+#else
+// Fallback for ESP32-S3 and compatible targets
+#define SDSPI_IOEXT_MAX_HOSTS (3)
+#endif
+
+static sdspi_ioext_context_t s_ctx[SDSPI_IOEXT_MAX_HOSTS] = {0};
 
 static sdspi_ioext_context_t *sdspi_ioext_get_ctx(intptr_t slot)
 {
     sdspi_dev_handle_t device = (sdspi_dev_handle_t)slot;
 
-    for (int i = 0; i < SOC_SPI_HOST_NUM; ++i) {
+    for (int i = 0; i < SDSPI_IOEXT_MAX_HOSTS; ++i) {
         sdspi_ioext_context_t *ctx = &s_ctx[i];
         if (ctx->in_use && ctx->device == device) {
             return ctx;
@@ -171,7 +181,7 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t
         host.max_freq_khz = config->max_freq_khz;
     }
 
-    host.slot = (sdmmc_slot_t)device;
+    host.slot = (int)(intptr_t)device;
     host.do_transaction = sdspi_ioext_do_transaction;
 
     spi_device_interface_config_t clock_if_cfg = {
@@ -188,6 +198,12 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t
         ESP_LOGE(TAG, "Failed to add SPI clock device: %s", esp_err_to_name(err));
         sdspi_host_remove_device(device);
         return err;
+    }
+
+    if (spi_host < 0 || spi_host >= SDSPI_IOEXT_MAX_HOSTS) {
+        ESP_LOGE(TAG, "Invalid SPI host %d", spi_host);
+        sdspi_host_remove_device(device);
+        return ESP_ERR_INVALID_ARG;
     }
 
     sdspi_ioext_context_t *ctx = &s_ctx[spi_host];
@@ -216,7 +232,7 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t
 
 esp_err_t sdspi_ioext_host_deinit(sdspi_dev_handle_t device, spi_host_device_t spi_host, bool free_bus)
 {
-    if (spi_host >= 0 && spi_host < SOC_SPI_HOST_NUM) {
+    if (spi_host >= 0 && spi_host < SDSPI_IOEXT_MAX_HOSTS) {
         if (s_ctx[spi_host].clock_dev) {
             spi_bus_remove_device(s_ctx[spi_host].clock_dev);
         }
