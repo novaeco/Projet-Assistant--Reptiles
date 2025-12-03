@@ -11,16 +11,23 @@
 static const char *TAG = "sdspi_ioext";
 
 typedef struct {
+    uint32_t cs_setup_delay_us;
+    uint32_t cs_hold_delay_us;
+    uint32_t max_freq_khz;
+    uint8_t retries;
+    uint32_t initial_clocks;
+} sdspi_ioext_host_config_t;
+
+typedef struct {
     sdspi_dev_handle_t device;
     spi_device_handle_t clock_dev;
     sdspi_ioext_cs_cb_t set_cs_cb;
     void *cs_user_ctx;
-    uint32_t cs_setup_delay_us;
-    uint32_t cs_hold_delay_us;
-    uint32_t initial_clocks;
+    sdspi_ioext_host_config_t cfg;
     bool sent_initial_clocks;
     spi_host_device_t host_id;
     sdspi_dev_handle_t slot_handle;
+    bool bus_initialized;
     bool in_use;
     SemaphoreHandle_t lock;
 } sdspi_ioext_context_t;
@@ -38,6 +45,13 @@ static sdspi_ioext_context_t s_ctx[SDSPI_IOEXT_MAX_HOSTS] = {0};
 
 static sdspi_ioext_context_t *sdspi_ioext_get_ctx(sdspi_dev_handle_t slot)
 {
+    ESP_LOGD(TAG, "Resolve ctx for slot handle=%p", (void *)slot);
+
+    if (slot == NULL) {
+        ESP_LOGE(TAG, "do_transaction slot mismatch (got=NULL)");
+        return NULL;
+    }
+
     for (int i = 0; i < SDSPI_IOEXT_MAX_HOSTS; ++i) {
         sdspi_ioext_context_t *ctx = &s_ctx[i];
         if (ctx->in_use && ctx->slot_handle == slot) {
@@ -85,7 +99,7 @@ static esp_err_t sdspi_ioext_send_initial_clocks(sdspi_ioext_context_t *ctx)
     uint8_t init_bytes[10];
     memset(init_bytes, 0xFF, sizeof(init_bytes));
     spi_transaction_t t = {
-        .length = (ctx->initial_clocks ? ctx->initial_clocks : 80),
+        .length = (ctx->cfg.initial_clocks ? ctx->cfg.initial_clocks : 80),
         .tx_buffer = init_bytes,
     };
 
@@ -108,7 +122,8 @@ static esp_err_t sdspi_ioext_send_initial_clocks(sdspi_ioext_context_t *ctx)
 
 static esp_err_t sdspi_ioext_do_transaction(int slot, sdmmc_command_t *cmd)
 {
-    sdspi_ioext_context_t *ctx = sdspi_ioext_get_ctx((sdspi_dev_handle_t)slot);
+    sdspi_dev_handle_t handle = (sdspi_dev_handle_t)(intptr_t)slot;
+    sdspi_ioext_context_t *ctx = sdspi_ioext_get_ctx(handle);
     if (!ctx) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -123,14 +138,14 @@ static esp_err_t sdspi_ioext_do_transaction(int slot, sdmmc_command_t *cmd)
 
     ESP_RETURN_ON_ERROR(sdspi_ioext_send_initial_clocks(ctx), TAG, "initial clocks failed");
     sdspi_ioext_toggle_cs(ctx, true);
-    if (ctx->cs_setup_delay_us) {
-        esp_rom_delay_us(ctx->cs_setup_delay_us);
+    if (ctx->cfg.cs_setup_delay_us) {
+        esp_rom_delay_us(ctx->cfg.cs_setup_delay_us);
     }
 
-    esp_err_t ret = sdspi_host_do_transaction(ctx->device, cmd);
+    esp_err_t ret = sdspi_host_do_transaction(handle, cmd);
 
-    if (ctx->cs_hold_delay_us) {
-        esp_rom_delay_us(ctx->cs_hold_delay_us);
+    if (ctx->cfg.cs_hold_delay_us) {
+        esp_rom_delay_us(ctx->cfg.cs_hold_delay_us);
     }
     sdspi_ioext_toggle_cs(ctx, false);
 
@@ -152,6 +167,14 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t
 
     spi_host_device_t spi_host = config->spi_host;
     esp_err_t err = ESP_OK;
+    bool bus_initialized_here = false;
+    sdspi_ioext_context_t *ctx = NULL;
+
+    ESP_RETURN_ON_FALSE(spi_host >= 0 && spi_host < SDSPI_IOEXT_MAX_HOSTS, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid SPI host id");
+
+    ctx = &s_ctx[spi_host];
+    memset(ctx, 0, sizeof(*ctx));
 
     if (config->bus_cfg) {
         // Mandatory order: initialize SPI bus prior to creating the SDSPI device handle
@@ -163,6 +186,8 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t
         if (err == ESP_ERR_INVALID_STATE) {
             ESP_LOGW(TAG, "SPI bus already initialized, reusing existing host %d", spi_host);
             err = ESP_OK;
+        } else {
+            bus_initialized_here = true;
         }
     }
 
@@ -176,6 +201,9 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t
     err = sdspi_host_init_device(&slot_config, &device);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "SDSPI device init failed: %s", esp_err_to_name(err));
+        if (bus_initialized_here) {
+            spi_bus_free(spi_host);
+        }
         return err;
     }
 
@@ -200,27 +228,34 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to add SPI clock device: %s", esp_err_to_name(err));
         sdspi_host_remove_device(device);
+        if (bus_initialized_here) {
+            spi_bus_free(spi_host);
+        }
         return err;
     }
 
     if (spi_host < 0 || spi_host >= SDSPI_IOEXT_MAX_HOSTS) {
         ESP_LOGE(TAG, "Invalid SPI host %d", spi_host);
         sdspi_host_remove_device(device);
+        spi_bus_remove_device(clock_dev);
+        if (bus_initialized_here) {
+            spi_bus_free(spi_host);
+        }
         return ESP_ERR_INVALID_ARG;
     }
 
-    sdspi_ioext_context_t *ctx = &s_ctx[spi_host];
-    memset(ctx, 0, sizeof(*ctx));
     ctx->device = device;
     ctx->clock_dev = clock_dev;
     ctx->set_cs_cb = config->set_cs_cb;
     ctx->cs_user_ctx = config->cs_user_ctx;
-    ctx->cs_setup_delay_us = config->cs_setup_delay_us;
-    ctx->cs_hold_delay_us = config->cs_hold_delay_us;
-    ctx->initial_clocks = config->initial_clocks ? config->initial_clocks : 80;
+    ctx->cfg.cs_setup_delay_us = config->cs_setup_delay_us;
+    ctx->cfg.cs_hold_delay_us = config->cs_hold_delay_us;
+    ctx->cfg.initial_clocks = config->initial_clocks ? config->initial_clocks : 80;
+    ctx->cfg.max_freq_khz = config->max_freq_khz;
     ctx->sent_initial_clocks = false;
     ctx->host_id = spi_host;
     ctx->slot_handle = device;
+    ctx->bus_initialized = bus_initialized_here;
     ctx->in_use = true;
     ctx->lock = xSemaphoreCreateMutex();
     if (!ctx->lock) {
@@ -231,13 +266,16 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t
     *device_out = device;
     ESP_LOGI(TAG, "sdspi_ioext: init done host=%d device_handle=%p host.slot=%p freq=%ukHz cs_setup=%uus cs_hold=%uus",
              spi_host, (void *)device, (void *)host.slot, host.max_freq_khz,
-             (unsigned)ctx->cs_setup_delay_us, (unsigned)ctx->cs_hold_delay_us);
+             (unsigned)ctx->cfg.cs_setup_delay_us, (unsigned)ctx->cfg.cs_hold_delay_us);
     return err;
 }
 
 esp_err_t sdspi_ioext_host_deinit(sdspi_dev_handle_t device, spi_host_device_t spi_host, bool free_bus)
 {
+    bool bus_owned = false;
+
     if (spi_host >= 0 && spi_host < SDSPI_IOEXT_MAX_HOSTS) {
+        bus_owned = s_ctx[spi_host].bus_initialized;
         if (s_ctx[spi_host].clock_dev) {
             spi_bus_remove_device(s_ctx[spi_host].clock_dev);
         }
@@ -250,7 +288,7 @@ esp_err_t sdspi_ioext_host_deinit(sdspi_dev_handle_t device, spi_host_device_t s
     if (device) {
         sdspi_host_remove_device(device);
     }
-    if (free_bus) {
+    if (free_bus && bus_owned) {
         spi_bus_free(spi_host);
     }
     return ESP_OK;
