@@ -14,6 +14,7 @@ typedef struct {
     uint32_t cs_hold_delay_us;
     uint32_t initial_clocks;
     bool sent_initial_clocks;
+    spi_host_device_t host_id;
 } sdspi_ioext_context_t;
 
 static sdspi_ioext_context_t s_ctx = {0};
@@ -57,10 +58,14 @@ static esp_err_t sdspi_ioext_send_initial_clocks(void)
     return ESP_OK;
 }
 
-static esp_err_t sdspi_ioext_do_transaction(sdspi_dev_handle_t handle, sdmmc_command_t *cmd)
+static esp_err_t sdspi_ioext_do_transaction(int slot, sdmmc_command_t *cmd)
 {
-    if (!handle || handle != s_ctx.device) {
+    if (!s_ctx.device) {
         return ESP_ERR_INVALID_STATE;
+    }
+
+    if (slot != s_ctx.host_id) {
+        ESP_LOGW(TAG, "do_transaction slot mismatch (got %d expected %d)", slot, s_ctx.host_id);
     }
 
     ESP_RETURN_ON_ERROR(sdspi_ioext_send_initial_clocks(), TAG, "initial clocks failed");
@@ -69,7 +74,7 @@ static esp_err_t sdspi_ioext_do_transaction(sdspi_dev_handle_t handle, sdmmc_com
         esp_rom_delay_us(s_ctx.cs_setup_delay_us);
     }
 
-    esp_err_t ret = sdspi_host_do_transaction(handle, cmd);
+    esp_err_t ret = sdspi_host_do_transaction(s_ctx.device, cmd);
 
     if (s_ctx.cs_hold_delay_us) {
         esp_rom_delay_us(s_ctx.cs_hold_delay_us);
@@ -127,6 +132,7 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t
     s_ctx.cs_hold_delay_us = config->cs_hold_delay_us;
     s_ctx.initial_clocks = config->initial_clocks ? config->initial_clocks : 80;
     s_ctx.sent_initial_clocks = false;
+    s_ctx.host_id = spi_host;
 
     *host_out = host;
     *device_out = device;
