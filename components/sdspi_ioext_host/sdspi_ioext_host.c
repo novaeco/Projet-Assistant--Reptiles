@@ -18,6 +18,19 @@ typedef struct {
 
 static sdspi_ioext_context_t s_ctx = {0};
 
+static inline void sdspi_ioext_toggle_cs(bool assert)
+{
+    if (!s_ctx.set_cs_cb) {
+        return;
+    }
+
+    esp_err_t cs_err = s_ctx.set_cs_cb(assert, s_ctx.cs_user_ctx);
+    if (cs_err != ESP_OK) {
+        ESP_LOGW(TAG, "CS toggle %s failed: %s", assert ? "assert" : "deassert", esp_err_to_name(cs_err));
+    }
+    ESP_LOGD(TAG, "CS %s via IO expander", assert ? "ASSERT" : "DEASSERT");
+}
+
 static esp_err_t sdspi_ioext_send_initial_clocks(void)
 {
     if (s_ctx.sent_initial_clocks) {
@@ -25,9 +38,7 @@ static esp_err_t sdspi_ioext_send_initial_clocks(void)
     }
 
     // Ensure CS is deasserted before issuing at least 74 clocks (10 bytes of 0xFF)
-    if (s_ctx.set_cs_cb) {
-        s_ctx.set_cs_cb(false, s_ctx.cs_user_ctx);
-    }
+    sdspi_ioext_toggle_cs(false);
 
     uint8_t init_bytes[10];
     memset(init_bytes, 0xFF, sizeof(init_bytes));
@@ -54,9 +65,7 @@ static esp_err_t sdspi_ioext_do_transaction(sdspi_dev_handle_t handle, sdmmc_com
 
     ESP_RETURN_ON_ERROR(sdspi_ioext_send_initial_clocks(), TAG, "initial clocks failed");
 
-    if (s_ctx.set_cs_cb) {
-        s_ctx.set_cs_cb(true, s_ctx.cs_user_ctx);
-    }
+    sdspi_ioext_toggle_cs(true);
     if (s_ctx.cs_setup_delay_us) {
         esp_rom_delay_us(s_ctx.cs_setup_delay_us);
     }
@@ -66,9 +75,7 @@ static esp_err_t sdspi_ioext_do_transaction(sdspi_dev_handle_t handle, sdmmc_com
     if (s_ctx.cs_hold_delay_us) {
         esp_rom_delay_us(s_ctx.cs_hold_delay_us);
     }
-    if (s_ctx.set_cs_cb) {
-        s_ctx.set_cs_cb(false, s_ctx.cs_user_ctx);
-    }
+    sdspi_ioext_toggle_cs(false);
 
     return ret;
 }
@@ -93,7 +100,8 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t
         }
     }
 
-    sdspi_device_config_t slot = config->slot_config;
+    sdspi_device_config_t slot = {0};
+    slot = config->slot_config;
     slot.host_id = spi_host;
     slot.gpio_cs = SDSPI_SLOT_NO_CS;
     slot.gpio_int = SDSPI_SLOT_NO_INT;

@@ -246,18 +246,27 @@ static void board_i2c_scan(i2c_master_bus_handle_t bus)
     esp_log_level_t prev_level = esp_log_level_get("i2c.master");
     esp_log_level_set("i2c.master", ESP_LOG_WARN);
 
-    ESP_LOGI(TAG_I2C, "Scanning I2C bus for devices (0x08..0x77) @ %d Hz...", BOARD_I2C_FREQ_HZ);
+    ESP_LOGI(TAG_I2C, "Scanning I2C bus for key devices (IO EXT + GT911) @ %d Hz...", BOARD_I2C_FREQ_HZ);
 
-    char ack_buf[256] = {0};
+    struct {
+        uint8_t addr;
+        const char *label;
+    } probes[] = {
+        {BOARD_IO_EXP_ADDR, "IO_EXT"},
+        {0x5D, "GT911_ALT1"},
+        {0x14, "GT911_ALT2"},
+    };
+
+    char ack_buf[96] = {0};
     size_t ack_len = 0;
     int found = 0;
     const TickType_t timeout_ticks = pdMS_TO_TICKS(150);
 
-    for (uint8_t addr = 0x08; addr <= 0x77; ++addr) {
-        if (i2c_master_probe(bus, addr, timeout_ticks) == ESP_OK) {
+    for (size_t i = 0; i < sizeof(probes) / sizeof(probes[0]); ++i) {
+        if (i2c_master_probe(bus, probes[i].addr, timeout_ticks) == ESP_OK) {
             ++found;
-            int written = snprintf(&ack_buf[ack_len], sizeof(ack_buf) - ack_len, "%s0x%02X",
-                                   ack_len == 0 ? "" : ", ", addr);
+            int written = snprintf(&ack_buf[ack_len], sizeof(ack_buf) - ack_len, "%s0x%02X(%s)",
+                                   ack_len == 0 ? "" : ", ", probes[i].addr, probes[i].label);
             if (written > 0 && ack_len + (size_t)written < sizeof(ack_buf)) {
                 ack_len += (size_t)written;
             }
@@ -265,9 +274,9 @@ static void board_i2c_scan(i2c_master_bus_handle_t bus)
     }
 
     if (found > 0) {
-        ESP_LOGI(TAG_I2C, "I2C scan ACK (%d device%s): %s", found, found > 1 ? "s" : "", ack_buf);
+        ESP_LOGI(TAG_I2C, "I2C scan ACK (%d/%d): %s", found, (int)(sizeof(probes) / sizeof(probes[0])), ack_buf);
     } else {
-        ESP_LOGW(TAG_I2C, "I2C scan: no devices responded");
+        ESP_LOGW(TAG_I2C, "I2C scan: no expected devices responded");
     }
 
     esp_log_level_set("i2c.master", prev_level);
@@ -379,6 +388,7 @@ static esp_err_t io_expander_sd_cs(bool assert, void *ctx)
     }
 
     bool level = !assert; // Active-low CS
+    ESP_LOGD(TAG_SD, "IOEXT SD CS %s (level=%d)", assert ? "ASSERT" : "DEASSERT", (int)level);
     if (ctx == s_io_ws && s_io_driver == IO_DRIVER_WAVESHARE) {
         return io_extension_ws_set_output(s_io_ws, IO_EXP_PIN_SD_CS, level);
     }
@@ -738,11 +748,10 @@ static esp_err_t gt911_detect_i2c_addr(uint8_t *addr_out, bool can_reset)
 
 esp_err_t board_mount_sdcard(void)
 {
-    esp_vfs_fat_sdmmc_mount_config_t mount_config = {
-        .format_if_mount_failed = false,
-        .max_files = 5,
-        .allocation_unit_size = 16 * 1024
-    };
+    esp_vfs_fat_sdmmc_mount_config_t mount_config = {0};
+    mount_config.format_if_mount_failed = false;
+    mount_config.max_files = 5;
+    mount_config.allocation_unit_size = 16 * 1024;
 
     if (!s_board_has_expander) {
         if (!s_logged_expander_absent) {
@@ -754,14 +763,13 @@ esp_err_t board_mount_sdcard(void)
 
     ESP_LOGI(TAG_SD, "Initializing SD Card via SPI (CS=EXIO4 via IO extender)...");
 
-    spi_bus_config_t bus_cfg = {
-        .mosi_io_num = BOARD_SD_MOSI,
-        .miso_io_num = BOARD_SD_MISO,
-        .sclk_io_num = BOARD_SD_CLK,
-        .quadwp_io_num = -1,
-        .quadhd_io_num = -1,
-        .max_transfer_sz = 4000,
-    };
+    spi_bus_config_t bus_cfg = {0};
+    bus_cfg.mosi_io_num = BOARD_SD_MOSI;
+    bus_cfg.miso_io_num = BOARD_SD_MISO;
+    bus_cfg.sclk_io_num = BOARD_SD_CLK;
+    bus_cfg.quadwp_io_num = -1;
+    bus_cfg.quadhd_io_num = -1;
+    bus_cfg.max_transfer_sz = 4000;
 
     sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
     slot_config.host_id = BOARD_SD_SPI_HOST;
@@ -781,6 +789,8 @@ esp_err_t board_mount_sdcard(void)
 
     bool spi_bus_initialized = false;
     bool spi_bus_owned = false;
+
+    s_card = NULL;
 
     esp_err_t bus_err = spi_bus_initialize(BOARD_SD_SPI_HOST, &bus_cfg, SDSPI_DEFAULT_DMA);
     if (bus_err == ESP_OK) {
