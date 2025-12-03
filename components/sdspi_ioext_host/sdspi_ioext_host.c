@@ -64,7 +64,6 @@ static esp_err_t sdspi_ioext_do_transaction(sdspi_dev_handle_t handle, sdmmc_com
     }
 
     ESP_RETURN_ON_ERROR(sdspi_ioext_send_initial_clocks(), TAG, "initial clocks failed");
-
     sdspi_ioext_toggle_cs(true);
     if (s_ctx.cs_setup_delay_us) {
         esp_rom_delay_us(s_ctx.cs_setup_delay_us);
@@ -131,6 +130,7 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t
 
     *host_out = host;
     *device_out = device;
+    ESP_LOGI(TAG, "SDSPI host %d ready (freq=%ukHz, cs via IO expander)", spi_host, host.max_freq_khz);
     return err;
 }
 
