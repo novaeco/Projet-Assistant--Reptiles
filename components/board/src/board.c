@@ -826,6 +826,9 @@ esp_err_t board_mount_sdcard(void)
             continue;
         }
 
+        ESP_LOGI(TAG_SD, "SDSPI host prepared (spi_host=%d, device=%p, host.slot=%p, target_freq=%dkHz)",
+                 BOARD_SD_SPI_HOST, (void *)s_sdspi_handle, (void *)host.slot, host.max_freq_khz);
+
         ESP_LOGI(TAG_SD, "SD attempt %d/%d @ %dkHz (MISO=%d MOSI=%d SCLK=%d CS=EXIO%u)",
                  (int)(attempt + 1), (int)max_attempts, freq_table_khz[attempt],
                  BOARD_SD_MISO, BOARD_SD_MOSI, BOARD_SD_CLK, IO_EXP_PIN_SD_CS);
