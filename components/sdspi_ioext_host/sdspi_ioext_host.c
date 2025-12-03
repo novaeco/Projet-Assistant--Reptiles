@@ -20,6 +20,7 @@ typedef struct {
     uint32_t initial_clocks;
     bool sent_initial_clocks;
     spi_host_device_t host_id;
+    intptr_t slot_handle;
     bool in_use;
     SemaphoreHandle_t lock;
 } sdspi_ioext_context_t;
@@ -37,16 +38,14 @@ static sdspi_ioext_context_t s_ctx[SDSPI_IOEXT_MAX_HOSTS] = {0};
 
 static sdspi_ioext_context_t *sdspi_ioext_get_ctx(intptr_t slot)
 {
-    sdspi_dev_handle_t device = (sdspi_dev_handle_t)slot;
-
     for (int i = 0; i < SDSPI_IOEXT_MAX_HOSTS; ++i) {
         sdspi_ioext_context_t *ctx = &s_ctx[i];
-        if (ctx->in_use && ctx->device == device) {
+        if (ctx->in_use && ctx->slot_handle == slot) {
             return ctx;
         }
     }
 
-    ESP_LOGE(TAG, "do_transaction slot mismatch (got=%p)", (void *)device);
+    ESP_LOGE(TAG, "do_transaction slot mismatch (got=%p)", (void *)slot);
     return NULL;
 }
 
@@ -116,8 +115,9 @@ static esp_err_t sdspi_ioext_do_transaction(int slot, sdmmc_command_t *cmd)
         xSemaphoreTake(ctx->lock, portMAX_DELAY);
     }
 
-    ESP_LOGD(TAG, "do_transaction(slot=%p, cmd=%d, flags=0x%x)", (void *)(intptr_t)slot, cmd ? cmd->opcode : -1,
-             cmd ? cmd->flags : 0);
+    ESP_LOGD(TAG, "do_transaction(slot=%p, cmd=%d, flags=0x%x, ctx_device=%p, ctx_slot=%p)",
+             (void *)(intptr_t)slot, cmd ? cmd->opcode : -1, cmd ? cmd->flags : 0,
+             ctx ? (void *)ctx->device : NULL, ctx ? (void *)ctx->slot_handle : NULL);
 
     ESP_RETURN_ON_ERROR(sdspi_ioext_send_initial_clocks(ctx), TAG, "initial clocks failed");
     sdspi_ioext_toggle_cs(ctx, true);
@@ -217,6 +217,7 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t
     ctx->initial_clocks = config->initial_clocks ? config->initial_clocks : 80;
     ctx->sent_initial_clocks = false;
     ctx->host_id = spi_host;
+    ctx->slot_handle = (intptr_t)device;
     ctx->in_use = true;
     ctx->lock = xSemaphoreCreateMutex();
     if (!ctx->lock) {
