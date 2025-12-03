@@ -1,6 +1,9 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <errno.h>
 #include "board.h"
 #include "board_pins.h"
 #include "sdkconfig.h"
@@ -837,6 +840,28 @@ esp_err_t board_mount_sdcard(void)
         if (ret == ESP_OK) {
             ESP_LOGI(TAG_SD, "SD Card mounted at %s", mount_point);
             sdmmc_card_print_info(stdout, s_card);
+
+            struct stat st = {0};
+            if (stat(mount_point, &st) == 0) {
+                ESP_LOGI(TAG_SD, "Mount point exists (mode=0x%lx)", (unsigned long)st.st_mode);
+            } else {
+                ESP_LOGW(TAG_SD, "stat(%s) failed: %s", mount_point, strerror(errno));
+            }
+
+            DIR *dir = opendir(mount_point);
+            if (dir) {
+                ESP_LOGI(TAG_SD, "Listing %s (up to 5 entries):", mount_point);
+                struct dirent *entry = NULL;
+                int count = 0;
+                while (count < 5 && (entry = readdir(dir)) != NULL) {
+                    ESP_LOGI(TAG_SD, "  %s", entry->d_name);
+                    ++count;
+                }
+                closedir(dir);
+            } else {
+                ESP_LOGW(TAG_SD, "opendir(%s) failed: %s", mount_point, strerror(errno));
+            }
+
             return ESP_OK;
         }
 
