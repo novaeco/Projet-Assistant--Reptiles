@@ -51,8 +51,8 @@ static sdspi_ioext_context_t *sdspi_ioext_get_ctx(sdspi_dev_handle_t handle)
     int32_t slot = (int32_t)(intptr_t)handle;
     ESP_LOGD(TAG, "Resolve ctx for slot id=%" PRIi32, slot);
 
-    if (handle == NULL) {
-        ESP_LOGE(TAG, "do_transaction slot mismatch (got=NULL)");
+    if (handle < 0) {
+        ESP_LOGE(TAG, "do_transaction slot mismatch (got invalid handle %" PRIi32 ")", slot);
         return NULL;
     }
 
