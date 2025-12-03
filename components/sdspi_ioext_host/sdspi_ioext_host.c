@@ -1,5 +1,6 @@
 #include "sdspi_ioext_host.h"
 #include <stdint.h>
+#include <inttypes.h>
 #include <string.h>
 #include "esp_check.h"
 #include "esp_log.h"
@@ -43,25 +44,27 @@ typedef struct {
 
 static sdspi_ioext_context_t s_ctx[SDSPI_IOEXT_MAX_HOSTS] = {0};
 
-static sdspi_ioext_context_t *sdspi_ioext_get_ctx(sdspi_dev_handle_t slot)
+static sdspi_ioext_context_t *sdspi_ioext_get_ctx(sdmmc_slot_t slot)
 {
-    ESP_LOGD(TAG, "Resolve ctx for slot handle=%p", (void *)slot);
+    ESP_LOGD(TAG, "Resolve ctx for slot id=%" PRIi32, (int32_t)slot);
 
-    if (slot == NULL) {
-        ESP_LOGE(TAG, "do_transaction slot mismatch (got=NULL)");
+    if (slot == 0) {
+        ESP_LOGE(TAG, "do_transaction slot mismatch (got=0)");
         return NULL;
     }
 
+    sdspi_dev_handle_t handle = (sdspi_dev_handle_t)(intptr_t)slot;
+
     for (int i = 0; i < SDSPI_IOEXT_MAX_HOSTS; ++i) {
         sdspi_ioext_context_t *ctx = &s_ctx[i];
-        if (ctx->in_use && ctx->slot_handle == slot) {
-            ESP_LOGD(TAG, "Resolved ctx index=%d host=%d device=%p for slot=%p", i, ctx->host_id,
-                     (void *)ctx->device, (void *)slot);
+        if (ctx->in_use && ctx->slot_handle == handle) {
+            ESP_LOGD(TAG, "Resolved ctx index=%d host=%d device=%p for slot_id=%" PRIi32, i, ctx->host_id,
+                     (void *)ctx->device, (int32_t)slot);
             return ctx;
         }
     }
 
-    ESP_LOGE(TAG, "do_transaction slot mismatch (got=%p)", (void *)slot);
+    ESP_LOGE(TAG, "do_transaction slot mismatch (slot=%" PRIi32 ")", (int32_t)slot);
     return NULL;
 }
 
@@ -123,7 +126,7 @@ static esp_err_t sdspi_ioext_send_initial_clocks(sdspi_ioext_context_t *ctx)
 static esp_err_t sdspi_ioext_do_transaction(int slot, sdmmc_command_t *cmd)
 {
     sdspi_dev_handle_t handle = (sdspi_dev_handle_t)(intptr_t)slot;
-    sdspi_ioext_context_t *ctx = sdspi_ioext_get_ctx(handle);
+    sdspi_ioext_context_t *ctx = sdspi_ioext_get_ctx(slot);
     if (!ctx) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -132,8 +135,8 @@ static esp_err_t sdspi_ioext_do_transaction(int slot, sdmmc_command_t *cmd)
         xSemaphoreTake(ctx->lock, portMAX_DELAY);
     }
 
-    ESP_LOGD(TAG, "do_transaction(slot=%p, cmd=%d, flags=0x%x, ctx_device=%p, ctx_slot=%p)",
-             (void *)(intptr_t)slot, cmd ? cmd->opcode : -1, cmd ? cmd->flags : 0,
+    ESP_LOGD(TAG, "do_transaction(slot_id=%" PRIi32 " handle=%p, cmd=%d, flags=0x%x, ctx_device=%p, ctx_slot=%p)",
+             (int32_t)slot, handle, cmd ? cmd->opcode : -1, cmd ? cmd->flags : 0,
              ctx ? (void *)ctx->device : NULL, ctx ? (void *)ctx->slot_handle : NULL);
 
     ESP_RETURN_ON_ERROR(sdspi_ioext_send_initial_clocks(ctx), TAG, "initial clocks failed");
@@ -264,8 +267,8 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t
 
     *host_out = host;
     *device_out = device;
-    ESP_LOGI(TAG, "sdspi_ioext: init done host=%d device_handle=%p host.slot=%p freq=%ukHz cs_setup=%uus cs_hold=%uus",
-             spi_host, (void *)device, (void *)host.slot, host.max_freq_khz,
+    ESP_LOGI(TAG, "sdspi_ioext: init done host=%d device_handle=%p host.slot=%" PRIi32 " freq=%ukHz cs_setup=%uus cs_hold=%uus",
+             spi_host, (void *)device, (int32_t)host.slot, host.max_freq_khz,
              (unsigned)ctx->cfg.cs_setup_delay_us, (unsigned)ctx->cfg.cs_hold_delay_us);
     return err;
 }
