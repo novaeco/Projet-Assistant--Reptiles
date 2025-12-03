@@ -20,7 +20,7 @@ typedef struct {
     uint32_t initial_clocks;
     bool sent_initial_clocks;
     spi_host_device_t host_id;
-    intptr_t slot_handle;
+    sdspi_dev_handle_t slot_handle;
     bool in_use;
     SemaphoreHandle_t lock;
 } sdspi_ioext_context_t;
@@ -36,7 +36,7 @@ typedef struct {
 
 static sdspi_ioext_context_t s_ctx[SDSPI_IOEXT_MAX_HOSTS] = {0};
 
-static sdspi_ioext_context_t *sdspi_ioext_get_ctx(intptr_t slot)
+static sdspi_ioext_context_t *sdspi_ioext_get_ctx(sdspi_dev_handle_t slot)
 {
     for (int i = 0; i < SDSPI_IOEXT_MAX_HOSTS; ++i) {
         sdspi_ioext_context_t *ctx = &s_ctx[i];
@@ -108,7 +108,7 @@ static esp_err_t sdspi_ioext_send_initial_clocks(sdspi_ioext_context_t *ctx)
 
 static esp_err_t sdspi_ioext_do_transaction(int slot, sdmmc_command_t *cmd)
 {
-    sdspi_ioext_context_t *ctx = sdspi_ioext_get_ctx(slot);
+    sdspi_ioext_context_t *ctx = sdspi_ioext_get_ctx((sdspi_dev_handle_t)slot);
     if (!ctx) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -172,13 +172,6 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t
     slot_config.gpio_cs = SDSPI_SLOT_NO_CS; // CS is driven externally through IO expander
     slot_config.gpio_int = SDSPI_SLOT_NO_INT;
 
-    if (slot_config.cs_setup_delay_us == 0) {
-        slot_config.cs_setup_delay_us = config->cs_setup_delay_us;
-    }
-    if (slot_config.cs_hold_delay_us == 0) {
-        slot_config.cs_hold_delay_us = config->cs_hold_delay_us;
-    }
-
     sdspi_dev_handle_t device = 0;
     err = sdspi_host_init_device(&slot_config, &device);
     if (err != ESP_OK) {
@@ -222,12 +215,12 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t
     ctx->clock_dev = clock_dev;
     ctx->set_cs_cb = config->set_cs_cb;
     ctx->cs_user_ctx = config->cs_user_ctx;
-    ctx->cs_setup_delay_us = (config->cs_setup_delay_us ? config->cs_setup_delay_us : slot_config.cs_setup_delay_us);
-    ctx->cs_hold_delay_us = (config->cs_hold_delay_us ? config->cs_hold_delay_us : slot_config.cs_hold_delay_us);
+    ctx->cs_setup_delay_us = config->cs_setup_delay_us;
+    ctx->cs_hold_delay_us = config->cs_hold_delay_us;
     ctx->initial_clocks = config->initial_clocks ? config->initial_clocks : 80;
     ctx->sent_initial_clocks = false;
     ctx->host_id = spi_host;
-    ctx->slot_handle = (intptr_t)device;
+    ctx->slot_handle = device;
     ctx->in_use = true;
     ctx->lock = xSemaphoreCreateMutex();
     if (!ctx->lock) {
