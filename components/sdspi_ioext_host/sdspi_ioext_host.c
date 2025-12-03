@@ -314,8 +314,8 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t
     ctx->clock_dev = clock_dev;
     ctx->set_cs_cb = config->set_cs_cb;
     ctx->cs_user_ctx = config->cs_user_ctx;
-    ctx->cfg.cs_setup_delay_us = config->cs_setup_delay_us;
-    ctx->cfg.cs_hold_delay_us = config->cs_hold_delay_us;
+    ctx->cfg.cs_setup_delay_us = config->cs_setup_delay_us ? config->cs_setup_delay_us : 5; // enforce a minimal CS setup time
+    ctx->cfg.cs_hold_delay_us = config->cs_hold_delay_us ? config->cs_hold_delay_us : 5;   // enforce a minimal CS hold time
     ctx->cfg.initial_clocks = config->initial_clocks ? config->initial_clocks : 80;
     ctx->cfg.max_freq_khz = config->max_freq_khz;
     ctx->sent_initial_clocks = false;
@@ -342,21 +342,51 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t
 esp_err_t sdspi_ioext_host_deinit(sdspi_dev_handle_t device, spi_host_device_t spi_host, bool free_bus)
 {
     bool bus_owned = false;
+    spi_device_handle_t clock_dev = NULL;
+    SemaphoreHandle_t ctx_lock = NULL;
+    sdspi_ioext_context_t *ctx = NULL;
+    bool took_ctx_lock = false;
+    sdspi_dev_handle_t device_handle = device;
 
+    if (spi_host >= 0 && spi_host < SDSPI_IOEXT_MAX_HOSTS && sdspi_ioext_lock_ctx_array(portMAX_DELAY)) {
+        ctx = &s_ctx[spi_host];
+        bus_owned = ctx->bus_initialized;
+        clock_dev = ctx->clock_dev;
+        ctx_lock = ctx->lock;
+        if (!device_handle) {
+            device_handle = ctx->device;
+        }
+        ctx->in_use = false; // prevent new lookups while tearing down
+        sdspi_ioext_unlock_ctx_array();
+    }
+
+    if (ctx_lock) {
+        xSemaphoreTake(ctx_lock, portMAX_DELAY);
+        took_ctx_lock = true;
+    }
+
+    if (clock_dev) {
+        spi_bus_remove_device(clock_dev);
+    }
+
+    if (spi_host >= 0 && spi_host < SDSPI_IOEXT_MAX_HOSTS && sdspi_ioext_lock_ctx_array(portMAX_DELAY)) {
+        if (ctx_lock && took_ctx_lock) {
+            xSemaphoreGive(ctx_lock);
+            vSemaphoreDelete(ctx_lock);
     if (spi_host >= 0 && spi_host < SDSPI_IOEXT_MAX_HOSTS && sdspi_ioext_lock_ctx_array(portMAX_DELAY)) {
         bus_owned = s_ctx[spi_host].bus_initialized;
         if (s_ctx[spi_host].clock_dev) {
             spi_bus_remove_device(s_ctx[spi_host].clock_dev);
         }
-        if (s_ctx[spi_host].lock) {
-            vSemaphoreDelete(s_ctx[spi_host].lock);
+        if (ctx) {
+            memset(ctx, 0, sizeof(*ctx));
         }
         memset(&s_ctx[spi_host], 0, sizeof(s_ctx[spi_host]));
         sdspi_ioext_unlock_ctx_array();
     }
 
-    if (device) {
-        sdspi_host_remove_device(device);
+    if (device_handle) {
+        sdspi_host_remove_device(device_handle);
     }
     if (free_bus && bus_owned) {
         spi_bus_free(spi_host);
