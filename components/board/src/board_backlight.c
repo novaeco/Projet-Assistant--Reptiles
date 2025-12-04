@@ -6,6 +6,8 @@
 #include "esp_check.h"
 #include "esp_log.h"
 #include "sdkconfig.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char *TAG = "BOARD_BK";
 
@@ -95,15 +97,17 @@ esp_err_t board_backlight_set_percent(uint8_t percent)
     }
 
     const int ledc_limit = (1 << BOARD_BACKLIGHT_LEDC_DUTY_RES) - 1;
-    int duty = ((int)percent * (int)max_duty) / 100;
-    if (duty < 0) {
-        duty = 0;
-    }
+    uint32_t duty = (uint32_t)(((double)percent / 100.0) * (double)max_duty);
+
     if (duty > max_duty) {
         duty = max_duty;
     }
-    if (duty > ledc_limit) {
-        duty = ledc_limit;
+    if (duty > (uint32_t)ledc_limit) {
+        duty = (uint32_t)ledc_limit;
+    }
+
+    if (s_backlight_cfg.active_low) {
+        duty = (uint32_t)max_duty - duty;
     }
 
     bool enable = percent > 0;
@@ -117,7 +121,7 @@ esp_err_t board_backlight_set_percent(uint8_t percent)
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "Backlight %u%% -> duty=%d/%u driver=%s enables:LCD_VDD=on BK=%s",
                  percent,
-                 duty,
+                 (int)duty,
                  (unsigned)max_duty,
                  board_backlight_driver_label(board_internal_get_io_driver()),
                  enable ? "on" : "off");
@@ -126,9 +130,35 @@ esp_err_t board_backlight_set_percent(uint8_t percent)
     return err;
 }
 
+static esp_err_t board_backlight_run_ramp(void)
+{
+    const uint8_t step = 5;
+    const TickType_t delay_ticks = pdMS_TO_TICKS(25);
+
+    for (uint8_t pct = 0; pct <= 100; pct += step) {
+        ESP_RETURN_ON_ERROR(board_backlight_set_percent(pct), TAG, "Ramp-up failed at %u%%", pct);
+        vTaskDelay(delay_ticks);
+        if (pct > 100 - step) {
+            break;
+        }
+    }
+
+    for (int pct = 100; pct >= 0; pct -= step) {
+        ESP_RETURN_ON_ERROR(board_backlight_set_percent((uint8_t)pct), TAG, "Ramp-down failed at %d%%", pct);
+        vTaskDelay(delay_ticks);
+        if (pct < step) {
+            break;
+        }
+    }
+
+    return ESP_OK;
+}
+
 esp_err_t board_backlight_init(const board_backlight_config_t *cfg)
 {
     s_backlight_cfg.max_duty = CONFIG_BOARD_BACKLIGHT_MAX_DUTY;
+    s_backlight_cfg.active_low = CONFIG_BOARD_BACKLIGHT_ACTIVE_LOW;
+    s_backlight_cfg.ramp_test = CONFIG_BOARD_BACKLIGHT_RAMP_TEST;
 
     if (cfg) {
         s_backlight_cfg = *cfg;
@@ -150,11 +180,20 @@ esp_err_t board_backlight_init(const board_backlight_config_t *cfg)
 
     ESP_RETURN_ON_ERROR(board_backlight_configure_ledc(), TAG, "LEDC setup failed");
 
-    ESP_LOGI(TAG, "Backlight backend=%s max_duty=%u",
+    ESP_LOGI(TAG, "Backlight backend=%s max_duty=%u active_low=%s ramp_test=%s",
              board_backlight_driver_label(board_internal_get_io_driver()),
-             (unsigned)s_backlight_cfg.max_duty);
+             (unsigned)s_backlight_cfg.max_duty,
+             s_backlight_cfg.active_low ? "y" : "n",
+             s_backlight_cfg.ramp_test ? "y" : "n");
 
     ESP_RETURN_ON_ERROR(board_backlight_set_percent(0), TAG, "Failed to apply initial 0%% brightness");
+
+    if (s_backlight_cfg.ramp_test) {
+        esp_err_t ramp_err = board_backlight_run_ramp();
+        if (ramp_err != ESP_OK) {
+            ESP_LOGW(TAG, "Ramp test failed: %s", esp_err_to_name(ramp_err));
+        }
+    }
 
     esp_err_t apply_err = board_backlight_set_percent(100);
     if (apply_err != ESP_OK) {

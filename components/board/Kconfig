@@ -98,9 +98,26 @@ menu "Backlight"
 config BOARD_BACKLIGHT_MAX_DUTY
     int "Valeur maximale du rapport cyclique pour le rétroéclairage (max 8192)"
     range 1 8192
-    default 8192
+    default 5000
     help
-      Rapport cyclique PWM maximal utilisé pour le rétroéclairage (résolution LEDC 13 bits).
+      Valeur maximale du rapport cyclique PWM utilisée pour représenter 100 % de
+      luminosité. Ajuster en fonction de la fréquence LEDC et de la courbe du
+      driver (résolution LEDC 13 bits).
+
+config BOARD_BACKLIGHT_ACTIVE_LOW
+    bool "Définir à y si la broche de PWM éteint l'écran lorsque le signal est à 1 (active-low)"
+    default n
+    help
+      Indique si le signal PWM de rétroéclairage doit être inversé (active-low).
+      Laisser à n pour les cartes Waveshare ESP32-S3 Touch LCD 7B câblées en
+      mode actif-haut, passer à y si le câblage inverse le sens du PWM.
+
+config BOARD_BACKLIGHT_RAMP_TEST
+    bool "Effectuer ou non un test de rampe de luminosité au démarrage"
+    default n
+    help
+      Lorsque activé, le rétroéclairage effectue un balayage 0 → 100 % puis
+      100 → 0 % au démarrage pour valider la plage effective de luminosité.
 
 endmenu
 
