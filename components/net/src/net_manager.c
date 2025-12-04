@@ -18,6 +18,43 @@ static uint32_t s_wifi_backoff_ms = 1000; // start at 1s
 static const char *DEFAULT_WIFI_SSID = "MY_SSID";
 static const char *DEFAULT_WIFI_PASSWORD = "MY_PASS";
 
+static esp_err_t apply_sta_config_with_recovery(const wifi_config_t *wifi_config, bool connect_on_success)
+{
+    if (!wifi_config) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    wifi_mode_t current_mode = WIFI_MODE_MAX;
+    esp_wifi_get_mode(&current_mode);
+    ESP_LOGI(TAG, "Applying STA config (mode=%d started=%s)", (int)current_mode,
+             esp_wifi_is_started() ? "yes" : "no");
+
+    esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, wifi_config);
+    if (err == ESP_ERR_WIFI_MODE) {
+        ESP_LOGW(TAG, "esp_wifi_set_config returned ESP_ERR_WIFI_MODE (mode=%d started=%s)", (int)current_mode,
+                 esp_wifi_is_started() ? "yes" : "no");
+
+        // Recovery sequence: stop, force STA, start, and retry config
+        esp_wifi_stop();
+        esp_wifi_set_mode(WIFI_MODE_STA);
+        esp_wifi_start();
+
+        err = esp_wifi_set_config(WIFI_IF_STA, wifi_config);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "STA config applied after recovery");
+            if (connect_on_success) {
+                esp_wifi_connect();
+            }
+        } else {
+            ESP_LOGE(TAG, "Failed to apply STA config after recovery: %s", esp_err_to_name(err));
+        }
+    } else if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to apply STA config: %s", esp_err_to_name(err));
+    }
+
+    return err;
+}
+
 static void wifi_retry_cb(void *arg)
 {
     (void)arg;
@@ -83,13 +120,18 @@ esp_err_t net_init(void)
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+
     // Apply debug credentials so the station connects immediately when no NVS entries are present
     wifi_config_t wifi_config = {0};
     strncpy((char *)wifi_config.sta.ssid, DEFAULT_WIFI_SSID, sizeof(wifi_config.sta.ssid));
     strncpy((char *)wifi_config.sta.password, DEFAULT_WIFI_PASSWORD, sizeof(wifi_config.sta.password));
     ESP_LOGI(TAG, "Applying debug Wi-Fi credentials (SSID='%s')", DEFAULT_WIFI_SSID);
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    has_credentials = (strlen(DEFAULT_WIFI_SSID) > 0);
+    if (apply_sta_config_with_recovery(&wifi_config, false) == ESP_OK) {
+        has_credentials = (strlen(DEFAULT_WIFI_SSID) > 0);
+    } else {
+        has_credentials = false;
+    }
 
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
                                                         ESP_EVENT_ANY_ID,
@@ -102,7 +144,6 @@ esp_err_t net_init(void)
                                                         NULL,
                                                         NULL));
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_LOGI(TAG, "Starting Wi-Fi station...");
     ESP_ERROR_CHECK(esp_wifi_start());
 
@@ -122,10 +163,11 @@ esp_err_t net_connect(const char *ssid, const char *password)
     strncpy((char*)wifi_config.sta.password, password, sizeof(wifi_config.sta.password));
 
     ESP_LOGI(TAG, "Connecting to %s...", ssid);
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    has_credentials = true;
-    s_wifi_backoff_ms = 1000;
-    schedule_wifi_retry(10);
+    if (apply_sta_config_with_recovery(&wifi_config, true) == ESP_OK) {
+        has_credentials = true;
+        s_wifi_backoff_ms = 1000;
+        schedule_wifi_retry(10);
+    }
 
     return ESP_OK;
 }

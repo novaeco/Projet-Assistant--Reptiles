@@ -80,40 +80,30 @@ static sdspi_ioext_context_t *sdspi_ioext_get_ctx(sdspi_dev_handle_t handle)
     const sdspi_dev_handle_t key = handle;
     ESP_LOGD(TAG, "Resolve ctx for handle=0x%08x (%d)", (unsigned)sdspi_ioext_handle_value(key), (int)key);
 
-    if (key == 0) {
-        ESP_LOGE(TAG, "do_transaction slot mismatch (got zero handle)");
-        return NULL;
-    }
-
     sdspi_ioext_context_t *found = NULL;
+    sdspi_ioext_context_t *first_in_use = NULL;
+
     if (sdspi_ioext_lock_ctx_array(portMAX_DELAY)) {
         for (int i = 0; i < SDSPI_IOEXT_MAX_HOSTS; ++i) {
             sdspi_ioext_context_t *ctx = &s_ctx[i];
-            if (ctx->in_use && ctx->slot_handle == key) {
-                ESP_LOGD(TAG, "Resolved ctx index=%d host=%d device=0x%08x slot_handle=0x%08x", i, ctx->host_id,
-                         (unsigned)sdspi_ioext_handle_value(ctx->device), (unsigned)sdspi_ioext_handle_value(ctx->slot_handle));
-                found = ctx;
-                break;
+            if (ctx->in_use) {
+                if (!first_in_use) {
+                    first_in_use = ctx;
+                }
+                if (key != 0 && ctx->slot_handle == key) {
+                    found = ctx;
+                    break;
+                }
             }
+        }
+        if (!found && first_in_use) {
+            ESP_LOGW(TAG, "Slot/handle mismatch, falling back to first active context (handle=0x%08x)",
+                     (unsigned)sdspi_ioext_handle_value(key));
+            found = first_in_use;
         }
         sdspi_ioext_unlock_ctx_array();
     }
 
-    if (!found) {
-        ESP_LOGE(TAG, "do_transaction slot mismatch (handle=0x%08x %d)", (unsigned)key, (int)key);
-        ESP_LOGE(TAG, "Known ctx keys:");
-        if (sdspi_ioext_lock_ctx_array(portMAX_DELAY)) {
-            for (int i = 0; i < SDSPI_IOEXT_MAX_HOSTS; ++i) {
-                if (s_ctx[i].in_use) {
-                    ESP_LOGE(TAG, "  idx=%d host=%d key=0x%08x (%d) device=0x%08x", i, s_ctx[i].host_id,
-                             (unsigned)sdspi_ioext_handle_value(s_ctx[i].slot_handle),
-                             (int)sdspi_ioext_handle_value(s_ctx[i].slot_handle),
-                             (unsigned)sdspi_ioext_handle_value(s_ctx[i].device));
-                }
-            }
-            sdspi_ioext_unlock_ctx_array();
-        }
-    }
     return found;
 }
 
@@ -177,14 +167,10 @@ static esp_err_t sdspi_ioext_do_transaction(int slot, sdmmc_command_t *cmd)
     static bool s_first_transaction_logged = false;
 
     const sdspi_dev_handle_t handle = (sdspi_dev_handle_t)slot;
-    if (sizeof(slot) != sizeof(handle)) {
-        ESP_LOGE(TAG,
-                 "do_transaction slot size mismatch: sizeof(slot)=%zu sizeof(handle)=%zu value=0x%08x (slot=%d)",
-                 sizeof(slot), sizeof(handle), (unsigned)slot, slot);
-    }
 
     sdspi_ioext_context_t *ctx = sdspi_ioext_get_ctx(handle);
     if (!ctx) {
+        ESP_LOGE(TAG, "SDSPI context unavailable for transaction");
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -219,7 +205,7 @@ static esp_err_t sdspi_ioext_do_transaction(int slot, sdmmc_command_t *cmd)
         esp_rom_delay_us(ctx->cfg.cs_setup_delay_us);
     }
 
-    ret = sdspi_host_do_transaction(handle, cmd);
+    ret = sdspi_host_do_transaction(ctx->device, cmd);
 
 cleanup:
     if (ctx && ctx->cfg.cs_hold_delay_us && cs_asserted) {

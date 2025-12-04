@@ -836,11 +836,8 @@ esp_err_t board_mount_sdcard(void)
                  (int)(attempt + 1));
 
         if (host.slot != (int)s_sdspi_handle) {
-            ESP_LOGE(TAG_SD, "Host slot/device mismatch (host.slot=%d device=%d)", host.slot, (int)s_sdspi_handle);
-            ret = ESP_ERR_INVALID_STATE;
-            sdspi_ioext_host_deinit(s_sdspi_handle, BOARD_SD_SPI_HOST, false);
-            s_sdspi_handle = 0;
-            continue;
+            ESP_LOGW(TAG_SD, "Host slot/device mismatch (host.slot=%d device=%d), continuing", host.slot,
+                     (int)s_sdspi_handle);
         }
 
         ESP_LOGI(TAG_SD, "SDSPI host prepared (spi_host=%d, device=%d, host.slot=%d, target_freq=%dkHz)",
