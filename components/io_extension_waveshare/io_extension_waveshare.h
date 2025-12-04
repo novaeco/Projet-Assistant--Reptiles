@@ -22,6 +22,8 @@ esp_err_t io_extension_ws_set_output(io_extension_ws_handle_t handle, uint8_t pi
 
 esp_err_t io_extension_ws_set_pwm_percent(io_extension_ws_handle_t handle, uint8_t percent);
 
+esp_err_t io_extension_ws_set_pwm_raw(io_extension_ws_handle_t handle, uint8_t duty);
+
 esp_err_t io_extension_ws_read_inputs(io_extension_ws_handle_t handle, uint8_t *value_out);
 
 esp_err_t io_extension_ws_read_adc(io_extension_ws_handle_t handle, uint16_t *value_out);

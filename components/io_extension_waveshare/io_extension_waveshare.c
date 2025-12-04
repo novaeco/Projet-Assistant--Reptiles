@@ -76,18 +76,21 @@ esp_err_t io_extension_ws_set_output(io_extension_ws_handle_t handle, uint8_t pi
     return io_extension_ws_write(handle, IO_EXTENSION_IO_OUTPUT_ADDR, handle->last_io_value);
 }
 
+esp_err_t io_extension_ws_set_pwm_raw(io_extension_ws_handle_t handle, uint8_t duty)
+{
+    ESP_RETURN_ON_FALSE(handle, ESP_ERR_INVALID_ARG, TAG, "null handle");
+    return io_extension_ws_write(handle, IO_EXTENSION_PWM_ADDR, duty);
+}
+
 esp_err_t io_extension_ws_set_pwm_percent(io_extension_ws_handle_t handle, uint8_t percent)
 {
     ESP_RETURN_ON_FALSE(handle, ESP_ERR_INVALID_ARG, TAG, "null handle");
     if (percent > 100) {
         percent = 100;
     }
-    if (percent > 97) {
-        percent = 97; // firmware note: avoid screen fully off
-    }
 
-    uint8_t duty = (uint8_t)((percent * 255) / 100);
-    return io_extension_ws_write(handle, IO_EXTENSION_PWM_ADDR, duty);
+    uint8_t duty = (uint8_t)(((uint32_t)percent * 255 + 50) / 100);
+    return io_extension_ws_set_pwm_raw(handle, duty);
 }
 
 esp_err_t io_extension_ws_read_inputs(io_extension_ws_handle_t handle, uint8_t *value_out)

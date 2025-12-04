@@ -7,7 +7,8 @@ This driver is adapted from the official demo (`io_extension` folder) and uses t
 ## API
 - `io_extension_ws_init(config, &handle)`: Bind the IO extension to an existing I2C master bus (address defaults to 0x24). All IOs are configured as push-pull outputs at startup.
 - `io_extension_ws_set_output(handle, pin, level)`: Drive IO0-IO7 high/low.
-- `io_extension_ws_set_pwm_percent(handle, percent)`: Set PWM duty cycle (0-100%, clamped to 97% per Waveshare firmware) for the backlight channel.
+- `io_extension_ws_set_pwm_percent(handle, percent)`: Set PWM duty cycle (0-100%) for the backlight channel.
+- `io_extension_ws_set_pwm_raw(handle, duty)`: Write an 8-bit duty value directly to the backlight PWM register (0x00-0xFF).
 - `io_extension_ws_read_inputs(handle, &value)`: Read IO input register (IO7 carries the battery-sense byte in Waveshare wiring).
 - `io_extension_ws_read_adc(handle, &value)`: Read the 16-bit ADC sample when available.
 

@@ -3,6 +3,6 @@ if(CONFIG_BOARD_ENABLE_SD)
     list(APPEND board_requires fatfs vfs sdmmc sdspi_ioext_host)
 endif()
 
-idf_component_register(SRCS "src/board.c"
+idf_component_register(SRCS "src/board.c" "src/board_backlight.c"
                       INCLUDE_DIRS "include"
                       REQUIRES ${board_requires})
