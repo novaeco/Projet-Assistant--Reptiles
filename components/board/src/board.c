@@ -1,9 +1,6 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
-#include <dirent.h>
-#include <sys/stat.h>
-#include <errno.h>
 #include <stdint.h>
 #include <inttypes.h>
 #include "board.h"
@@ -31,13 +28,6 @@
 #include "io_extension_waveshare.h"
 #include "ch422g.h"
 
-#if CONFIG_BOARD_ENABLE_SD
-#include "driver/sdspi_host.h"
-#include "esp_vfs_fat.h"
-#include "sdmmc_cmd.h"
-#include "sdspi_ioext_host.h"
-#endif
-
 static const char *TAG = "BOARD";
 static const char *TAG_I2C = "BOARD_I2C";
 static const char *TAG_CH422 = "CH422G";
@@ -54,15 +44,8 @@ static bool s_board_has_expander = false;
 static bool s_board_has_lcd = false;
 static uint8_t s_batt_raw_empty = CONFIG_BOARD_BATTERY_RAW_EMPTY;
 static uint8_t s_batt_raw_full = CONFIG_BOARD_BATTERY_RAW_FULL;
-static bool s_logged_expander_absent = false;
 static bool s_logged_batt_unavailable = false;
-
-#if CONFIG_BOARD_ENABLE_SD
-static sdmmc_card_t *s_card = NULL;
-static sdspi_dev_handle_t s_sdspi_handle = (sdspi_dev_handle_t)-1;
-#else
-static void *s_card = NULL;
-#endif
+static bool s_card_mounted = false;
 
 typedef enum {
     IO_DRIVER_NONE = 0,
@@ -101,14 +84,6 @@ static esp_err_t board_load_battery_calibration(void)
     ESP_LOGI(TAG, "Battery calibration defaults applied: empty=%u, full=%u", s_batt_raw_empty, s_batt_raw_full);
     return ESP_ERR_NOT_FOUND;
 }
-
-#if CONFIG_BOARD_ENABLE_SD
-static void board_delay_for_sd(void)
-{
-    // Give the card/expander some time to settle before toggling CS
-    vTaskDelay(pdMS_TO_TICKS(20));
-}
-#endif
 
 static void board_log_i2c_levels(const char *stage)
 {
@@ -823,192 +798,12 @@ static esp_err_t gt911_detect_i2c_addr(uint8_t *addr_out, bool can_reset)
 // =============================================================================
 // SD Card
 // =============================================================================
-#if CONFIG_BOARD_ENABLE_SD
-
 esp_err_t board_mount_sdcard(void)
 {
-    esp_vfs_fat_sdmmc_mount_config_t mount_config = {0};
-    mount_config.format_if_mount_failed = false;
-    mount_config.max_files = 5;
-    mount_config.allocation_unit_size = 16 * 1024;
-
-    if (!s_board_has_expander) {
-        if (!s_logged_expander_absent) {
-            ESP_LOGW(TAG_SD, "Skipping SD mount: IO expander unavailable for CS control");
-            s_logged_expander_absent = true;
-        }
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    ESP_LOGI(TAG_SD, "Initializing SD Card via SPI (CS=EXIO4 via IO extender)...");
-    ESP_LOGI(TAG_SD, "SPI pins: MOSI=%d MISO=%d CLK=%d (host=%d)",
-             BOARD_SD_MOSI, BOARD_SD_MISO, BOARD_SD_CLK, BOARD_SD_SPI_HOST);
-
-    spi_bus_config_t bus_cfg = {0};
-    bus_cfg.mosi_io_num = BOARD_SD_MOSI;
-    bus_cfg.miso_io_num = BOARD_SD_MISO;
-    bus_cfg.sclk_io_num = BOARD_SD_CLK;
-    bus_cfg.quadwp_io_num = -1;
-    bus_cfg.quadhd_io_num = -1;
-    bus_cfg.max_transfer_sz = 4000;
-
-    sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
-    slot_config.host_id = BOARD_SD_SPI_HOST;
-    slot_config.gpio_cs = SDSPI_SLOT_NO_CS;
-    slot_config.gpio_int = SDSPI_SLOT_NO_INT;
-
-    const char mount_point[] = "/sdcard";
-    static const int freq_table_khz[] = {400, 1000, 5000, 20000};
-    const size_t max_attempts = sizeof(freq_table_khz) / sizeof(freq_table_khz[0]);
-    esp_err_t ret = ESP_FAIL;
-
-    void *cs_ctx = board_get_io_cs_ctx();
-
-    // Ensure CS idles high before the first clock train
-    io_expander_sd_cs(false, cs_ctx);
-    board_delay_for_sd();
-
-    bool spi_bus_initialized = false;
-    bool spi_bus_owned = false;
-
-    s_card = NULL;
-
-    esp_err_t bus_err = spi_bus_initialize(BOARD_SD_SPI_HOST, &bus_cfg, SDSPI_DEFAULT_DMA);
-    if (bus_err == ESP_OK) {
-        spi_bus_initialized = true;
-        spi_bus_owned = true;
-        ESP_LOGI(TAG_SD, "SPI bus initialized for SDSPI host %d", BOARD_SD_SPI_HOST);
-    } else if (bus_err == ESP_ERR_INVALID_STATE) {
-        spi_bus_initialized = true;
-        spi_bus_owned = false;
-        ESP_LOGW(TAG_SD, "SPI bus for host %d already initialized, reusing", BOARD_SD_SPI_HOST);
-    } else {
-        ESP_LOGE(TAG_SD, "Failed to initialize SPI bus for host %d: %s", BOARD_SD_SPI_HOST, esp_err_to_name(bus_err));
-        return bus_err;
-    }
-
-    for (size_t attempt = 0; attempt < max_attempts; ++attempt) {
-        sdspi_dev_handle_t attempt_handle = (sdspi_dev_handle_t)-1;
-        sdspi_ioext_config_t ioext_cfg = {
-            .spi_host = BOARD_SD_SPI_HOST,
-            .slot_config = slot_config,
-            .set_cs_cb = io_expander_sd_cs,
-            .set_cs_user_ctx = cs_ctx,
-            .hold_cs_low = CONFIG_BOARD_SD_HOLD_CS_LOW_DIAG,
-            .max_freq_khz = freq_table_khz[attempt],
-        };
-
-        sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-        host.slot = (sdmmc_slot_t)SDSPI_IO_EXTENDER_SLOT;
-        host.flags = SDMMC_HOST_FLAG_SPI;
-        host.command_timeout_ms = 2000;
-        host.max_freq_khz = freq_table_khz[attempt];
-        host.max_freq_io = host.max_freq_khz * 1000;
-
-        ret = sdspi_ioext_host_init(&ioext_cfg, &host, &attempt_handle);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG_SD, "sdspi_ioext_host_init attempt %d failed: %s", attempt + 1, esp_err_to_name(ret));
-            if (attempt_handle != (sdspi_dev_handle_t)-1) {
-                sdspi_ioext_host_deinit(attempt_handle, BOARD_SD_SPI_HOST, false);
-            }
-            continue;
-        }
-
-        s_sdspi_handle = attempt_handle;
-
-        ESP_LOGI(TAG_SD, "SDSPI device handle=%d host.slot=%d (attempt=%d)",
-                 (int)s_sdspi_handle, host.slot, (int)(attempt + 1));
-
-        ESP_LOGI(TAG_SD, "SDSPI host prepared (spi_host=%d, device=%d, host.slot=%d, target_freq=%dkHz)",
-                 BOARD_SD_SPI_HOST, (int)s_sdspi_handle, host.slot, host.max_freq_khz);
-
-        ESP_LOGD(TAG_SD, "About to mount: host.slot=%d (0x%08x)", host.slot, (unsigned)host.slot);
-
-        ESP_LOGI(TAG_SD, "SD attempt %d/%d @ %dkHz (MISO=%d MOSI=%d SCLK=%d CS=EXIO%u)",
-                 (int)(attempt + 1), (int)max_attempts, freq_table_khz[attempt],
-                 BOARD_SD_MISO, BOARD_SD_MOSI, BOARD_SD_CLK, IO_EXP_PIN_SD_CS);
-
-        ret = esp_vfs_fat_sdspi_mount(mount_point, &host, &slot_config, &mount_config, &s_card);
-        if (ret == ESP_OK) {
-            ESP_LOGI(TAG_SD, "SD Card mounted at %s", mount_point);
-            sdmmc_card_print_info(stdout, s_card);
-
-            struct stat st = {0};
-            if (stat(mount_point, &st) == 0) {
-                ESP_LOGI(TAG_SD, "Mount point exists (mode=0x%lx)", (unsigned long)st.st_mode);
-            } else {
-                ESP_LOGW(TAG_SD, "stat(%s) failed: %s", mount_point, strerror(errno));
-            }
-
-            const char *rw_path = "/sdcard/test.txt";
-            const char *rw_payload = "ok";
-            FILE *rw = fopen(rw_path, "w");
-            if (rw) {
-                fwrite(rw_payload, 1, strlen(rw_payload), rw);
-                fclose(rw);
-                ESP_LOGI(TAG_SD, "Wrote validation payload to %s", rw_path);
-                rw = fopen(rw_path, "r");
-                if (rw) {
-                    char buf[8] = {0};
-                    size_t n = fread(buf, 1, sizeof(buf) - 1, rw);
-                    fclose(rw);
-                    if (n == strlen(rw_payload) && strncmp(buf, rw_payload, strlen(rw_payload)) == 0) {
-                        ESP_LOGI(TAG_SD, "Validated SD readback from %s (%s)", rw_path, buf);
-                    } else {
-                        ESP_LOGW(TAG_SD, "Readback mismatch from %s (got %zu bytes: %s)", rw_path, n, buf);
-                    }
-                } else {
-                    ESP_LOGW(TAG_SD, "Failed to reopen %s for read: %s", rw_path, strerror(errno));
-                }
-            } else {
-                ESP_LOGW(TAG_SD, "Failed to create %s: %s", rw_path, strerror(errno));
-            }
-
-            DIR *dir = opendir(mount_point);
-            if (dir) {
-                ESP_LOGI(TAG_SD, "Listing %s (up to 5 entries):", mount_point);
-                struct dirent *entry = NULL;
-                int count = 0;
-                while (count < 5 && (entry = readdir(dir)) != NULL) {
-                    ESP_LOGI(TAG_SD, "  %s", entry->d_name);
-                    ++count;
-                }
-                closedir(dir);
-            } else {
-                ESP_LOGW(TAG_SD, "opendir(%s) failed: %s", mount_point, strerror(errno));
-            }
-
-            return ESP_OK;
-        }
-
-        ESP_LOGW(TAG_SD, "SD mount failed (attempt %d): %s", attempt + 1, esp_err_to_name(ret));
-        sdspi_ioext_host_deinit(s_sdspi_handle, BOARD_SD_SPI_HOST, false);
-        s_sdspi_handle = (sdspi_dev_handle_t)-1;
-        io_expander_sd_cs(false, cs_ctx);
-        board_delay_for_sd();
-    }
-
-    if (ret == ESP_FAIL) {
-        ESP_LOGE(TAG_SD, "Failed to mount filesystem.");
-    } else {
-        ESP_LOGE(TAG_SD, "Failed to initialize the card (%s).", esp_err_to_name(ret));
-    }
-    if (spi_bus_initialized) {
-        sdspi_ioext_host_deinit(s_sdspi_handle, BOARD_SD_SPI_HOST, spi_bus_owned);
-        s_sdspi_handle = (sdspi_dev_handle_t)-1;
-        io_expander_sd_cs(false, cs_ctx);
-    }
-    ESP_LOGW(TAG_SD, "SD disabled, continuing without /sdcard (insert card and retry later)");
-    return ret;
-}
-#else
-esp_err_t board_mount_sdcard(void)
-{
-    s_card = NULL;
-    ESP_LOGI(TAG_SD, "SD disabled by config");
+    s_card_mounted = false;
+    ESP_LOGI(TAG_SD, "SD support permanently disabled; skipping mount");
     return ESP_ERR_NOT_SUPPORTED;
 }
-#endif
 
 // =============================================================================
 // Public API
@@ -1031,13 +826,10 @@ esp_err_t board_init(void)
         status = (status == ESP_OK) ? expander_err : status;
     }
 
-#if CONFIG_BOARD_ENABLE_SD
     esp_err_t sd_err = board_mount_sdcard();
-    if (sd_err != ESP_OK) {
-        ESP_LOGW(TAG_SD, "SD card not mounted: %s", esp_err_to_name(sd_err));
-        s_card = NULL;
+    if (sd_err != ESP_OK && sd_err != ESP_ERR_NOT_SUPPORTED) {
+        ESP_LOGI(TAG_SD, "SD mount skipped: %s", esp_err_to_name(sd_err));
     }
-#endif
 
     esp_err_t lcd_err = board_lcd_init();
     if (lcd_err != ESP_OK) {
@@ -1052,7 +844,13 @@ esp_err_t board_init(void)
         status = (status == ESP_OK) ? touch_err : status;
     }
 
-    esp_err_t backlight_err = board_backlight_init();
+    const board_backlight_init_config_t backlight_cfg = {
+        .max_duty = CONFIG_BOARD_BACKLIGHT_MAX_DUTY,
+        .active_low = CONFIG_BOARD_BACKLIGHT_ACTIVE_LOW,
+        .ramp_test = CONFIG_BOARD_BACKLIGHT_RAMP_TEST,
+    };
+
+    esp_err_t backlight_err = board_backlight_init(&backlight_cfg);
     if (backlight_err != ESP_OK && backlight_err != ESP_ERR_INVALID_STATE) {
         ESP_LOGW(TAG, "Backlight init reported: %s", esp_err_to_name(backlight_err));
         status = (status == ESP_OK) ? backlight_err : status;
@@ -1229,7 +1027,12 @@ bool board_touch_is_ready(void)
 
 bool board_sd_is_mounted(void)
 {
-    return s_card != NULL;
+    return s_card_mounted;
+}
+
+bool board_has_sd(void)
+{
+    return false;
 }
 
 bool board_lcd_is_ready(void)

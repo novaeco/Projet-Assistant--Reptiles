@@ -11,19 +11,20 @@
 #define CONFIG_BOARD_BACKLIGHT_MAX_DUTY 255
 #endif
 
-#ifdef CONFIG_BOARD_BACKLIGHT_ACTIVE_LOW
-#define BOARD_BL_ACTIVE_LOW 1
-#else
-#define BOARD_BL_ACTIVE_LOW 0
+#ifndef CONFIG_BOARD_BACKLIGHT_ACTIVE_LOW
+#define CONFIG_BOARD_BACKLIGHT_ACTIVE_LOW 0
 #endif
 
-#ifdef CONFIG_BOARD_BACKLIGHT_RAMP_TEST
-#define BOARD_BL_RAMP_TEST 1
-#else
-#define BOARD_BL_RAMP_TEST 0
+#ifndef CONFIG_BOARD_BACKLIGHT_RAMP_TEST
+#define CONFIG_BOARD_BACKLIGHT_RAMP_TEST 0
 #endif
 
 static const char *TAG = "BOARD_BK";
+static board_backlight_init_config_t s_bl_cfg = {
+    .max_duty = CONFIG_BOARD_BACKLIGHT_MAX_DUTY,
+    .active_low = CONFIG_BOARD_BACKLIGHT_ACTIVE_LOW,
+    .ramp_test = CONFIG_BOARD_BACKLIGHT_RAMP_TEST,
+};
 
 static const char *board_backlight_driver_label(board_io_driver_t drv)
 {
@@ -69,19 +70,19 @@ esp_err_t board_backlight_set_percent(uint8_t percent)
         return ESP_ERR_INVALID_STATE;
     }
 
-    const uint16_t max_duty = CONFIG_BOARD_BACKLIGHT_MAX_DUTY;
+    const uint16_t max_duty = s_bl_cfg.max_duty;
     if (max_duty == 0) {
-        ESP_LOGE(TAG, "Invalid CONFIG_BOARD_BACKLIGHT_MAX_DUTY=0");
+        ESP_LOGE(TAG, "Invalid backlight max_duty=0");
         return ESP_ERR_INVALID_ARG;
     }
 
-    uint32_t duty = ((uint32_t)percent * (uint32_t)CONFIG_BOARD_BACKLIGHT_MAX_DUTY + 50u) / 100u;
-    if (duty > (uint32_t)CONFIG_BOARD_BACKLIGHT_MAX_DUTY) {
-        duty = (uint32_t)CONFIG_BOARD_BACKLIGHT_MAX_DUTY;
+    uint32_t duty = ((uint32_t)percent * (uint32_t)max_duty + 50u) / 100u;
+    if (duty > (uint32_t)max_duty) {
+        duty = (uint32_t)max_duty;
     }
 
-    if (BOARD_BL_ACTIVE_LOW) {
-        duty = (uint32_t)CONFIG_BOARD_BACKLIGHT_MAX_DUTY - duty;
+    if (s_bl_cfg.active_low) {
+        duty = (uint32_t)max_duty - duty;
     }
 
     bool enable = percent > 0;
@@ -97,13 +98,12 @@ esp_err_t board_backlight_set_percent(uint8_t percent)
     ESP_LOGI(TAG, "Backlight %u%% -> duty=%u/%u (raw=%u) driver=%s active_low=%d enables:LCD_VDD=on BK=%s",
              percent, duty, max_duty, (unsigned)applied_raw,
              board_backlight_driver_label(driver),
-             BOARD_BL_ACTIVE_LOW,
+             s_bl_cfg.active_low,
              enable ? "on" : "off");
 
     return ESP_OK;
 }
 
-#if BOARD_BL_RAMP_TEST
 static void board_backlight_run_ramp(void)
 {
     ESP_LOGI(TAG, "Starting backlight ramp test (0->100%% step=10%%)");
@@ -113,10 +113,18 @@ static void board_backlight_run_ramp(void)
         vTaskDelay(pdMS_TO_TICKS(500));
     }
 }
-#endif
 
-esp_err_t board_backlight_init(void)
+esp_err_t board_backlight_init(const board_backlight_init_config_t *config)
 {
+    if (config) {
+        s_bl_cfg = *config;
+    }
+
+    if (s_bl_cfg.max_duty == 0) {
+        ESP_LOGW(TAG, "max_duty=0 from config, restoring default 255");
+        s_bl_cfg.max_duty = 255;
+    }
+
     if (!board_internal_has_expander()) {
         ESP_LOGW(TAG, "Backlight init skipped (expander absent)");
         return ESP_ERR_INVALID_STATE;
@@ -124,13 +132,18 @@ esp_err_t board_backlight_init(void)
 
     ESP_LOGI(TAG, "Backlight backend=%s max_duty=%u active_low=%d ramp_test=%d",
              board_backlight_driver_label(board_internal_get_io_driver()),
-             (unsigned)CONFIG_BOARD_BACKLIGHT_MAX_DUTY,
-             BOARD_BL_ACTIVE_LOW,
-             BOARD_BL_RAMP_TEST);
+             (unsigned)s_bl_cfg.max_duty,
+             s_bl_cfg.active_low,
+             s_bl_cfg.ramp_test);
 
-#if BOARD_BL_RAMP_TEST
-    board_backlight_run_ramp();
-#endif
+    if (s_bl_cfg.ramp_test) {
+        board_backlight_run_ramp();
+    }
+
+    esp_err_t apply_err = board_backlight_set_percent(100);
+    if (apply_err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to apply default 100%% brightness: %s", esp_err_to_name(apply_err));
+    }
 
     return ESP_OK;
 }

@@ -48,6 +48,11 @@ bool board_touch_is_ready(void);
 bool board_sd_is_mounted(void);
 
 /**
+ * @brief Check if the board exposes an SD slot (always false while SD is disabled).
+ */
+bool board_has_sd(void);
+
+/**
  * @brief Check if the RGB LCD panel is initialized.
  */
 bool board_lcd_is_ready(void);
