@@ -9,6 +9,13 @@
 extern "C" {
 #endif
 
+/**
+ * Align the SDSPI device handle type with the underlying SPI master handle.
+ * This avoids pointer/integer mismatches when the handle is used as an opaque
+ * pointer returned by spi_bus_add_device().
+ */
+typedef spi_device_handle_t sdspi_dev_handle_t;
+
 typedef esp_err_t (*sdspi_ioext_cs_cb_t)(bool assert, void *user_ctx);
 
 typedef struct {
