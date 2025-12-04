@@ -26,23 +26,18 @@ static esp_err_t apply_sta_config_with_recovery(const wifi_config_t *wifi_config
         return ESP_ERR_INVALID_ARG;
     }
 
-    wifi_mode_t current_mode = WIFI_MODE_MAX;
+    wifi_mode_t current_mode = WIFI_MODE_NULL;
     esp_err_t err = esp_wifi_get_mode(&current_mode);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "esp_wifi_get_mode failed: %s", esp_err_to_name(err));
-        // Continue with WIFI_MODE_MAX in logs; recovery below will reset mode as needed
+        // Continue; recovery below will reset mode as needed
     }
+
     wifi_config_t cfg = *wifi_config_in;
 
     ESP_LOGI(TAG, "Applying STA config (mode=%d)", (int)current_mode);
 
     err = esp_wifi_set_config(WIFI_IF_STA, &cfg);
-    esp_wifi_get_mode(&current_mode);
-    wifi_config_t cfg = *wifi_config_in;
-
-    ESP_LOGI(TAG, "Applying STA config (mode=%d)", (int)current_mode);
-
-    esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &cfg);
     if (err == ESP_ERR_WIFI_MODE) {
         ESP_LOGW(TAG, "esp_wifi_set_config returned ESP_ERR_WIFI_MODE (mode=%d)", (int)current_mode);
 
