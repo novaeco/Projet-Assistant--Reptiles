@@ -27,6 +27,13 @@
 #include "io_extension_waveshare.h"
 #include "ch422g.h"
 
+#ifndef CONFIG_BOARD_BACKLIGHT_ACTIVE_LOW
+#define CONFIG_BOARD_BACKLIGHT_ACTIVE_LOW 0
+#endif
+#ifndef CONFIG_BOARD_BACKLIGHT_RAMP_TEST
+#define CONFIG_BOARD_BACKLIGHT_RAMP_TEST 0
+#endif
+
 static const char *TAG = "BOARD";
 static const char *TAG_I2C = "BOARD_I2C";
 static const char *TAG_CH422 = "CH422G";
