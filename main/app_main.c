@@ -32,8 +32,8 @@ void app_main(void)
     ESP_LOGI(TAG, "Initializing storage (NVS + filesystem)...");
     ESP_ERROR_CHECK(storage_init());
 
-    // 2. Initialize Board (GPIO, Power, LCD, Touch, SD Card mounting)
-    ESP_LOGI(TAG, "Bringing up board peripherals (LCD, touch, SD, IO expander)...");
+    // 2. Initialize Board (IO expander + SD bus first, then LCD/Touch)
+    ESP_LOGI(TAG, "Bringing up board peripherals (SD bus before LCD/LVGL, touch, IO expander)...");
     esp_err_t board_err = board_init();
     if (board_err != ESP_OK) {
         ESP_LOGE(TAG, "Board init completed with errors: %s", esp_err_to_name(board_err));
