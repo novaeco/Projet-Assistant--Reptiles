@@ -172,9 +172,16 @@ static esp_err_t sdspi_ioext_send_initial_clocks(sdspi_ioext_context_t *ctx)
     return ESP_OK;
 }
 
-static esp_err_t sdspi_ioext_do_transaction(sdspi_dev_handle_t handle, sdmmc_command_t *cmd)
+static esp_err_t sdspi_ioext_do_transaction(int slot, sdmmc_command_t *cmd)
 {
     static bool s_first_transaction_logged = false;
+
+    const sdspi_dev_handle_t handle = (sdspi_dev_handle_t)slot;
+    if (sizeof(slot) != sizeof(handle)) {
+        ESP_LOGE(TAG,
+                 "do_transaction slot size mismatch: sizeof(slot)=%zu sizeof(handle)=%zu value=0x%08x (slot=%d)",
+                 sizeof(slot), sizeof(handle), (unsigned)slot, slot);
+    }
 
     sdspi_ioext_context_t *ctx = sdspi_ioext_get_ctx(handle);
     if (!ctx) {
@@ -186,8 +193,8 @@ static esp_err_t sdspi_ioext_do_transaction(sdspi_dev_handle_t handle, sdmmc_com
     }
 
     ESP_LOGD(TAG,
-             "do_transaction(handle=0x%08x (%d) cmd=%d flags=0x%x ctx_device=0x%08x ctx_slot=0x%08x)",
-             (unsigned)sdspi_ioext_handle_value(handle), (int)sdspi_ioext_handle_value(handle),
+             "do_transaction(slot=%d handle=0x%08x (%d) cmd=%d flags=0x%x ctx_device=0x%08x ctx_slot=0x%08x)",
+             slot, (unsigned)sdspi_ioext_handle_value(handle), (int)sdspi_ioext_handle_value(handle),
              cmd ? cmd->opcode : -1, cmd ? cmd->flags : 0,
              ctx ? (unsigned)sdspi_ioext_handle_value(ctx->device) : 0,
              ctx ? (unsigned)sdspi_ioext_handle_value(ctx->slot_handle) : 0);
@@ -289,6 +296,10 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t
 
     host.slot = (int)device;
     host.do_transaction = sdspi_ioext_do_transaction;
+
+    ESP_LOGI(TAG,
+             "sdspi_ioext types: sizeof(sdspi_dev_handle_t)=%zu sizeof(int)=%zu sizeof(void*)=%zu device_handle=0x%08x",
+             sizeof(sdspi_dev_handle_t), sizeof(int), sizeof(void *), (unsigned)sdspi_ioext_handle_value(device));
 
     spi_device_interface_config_t clock_if_cfg = {
         .mode = 0,
