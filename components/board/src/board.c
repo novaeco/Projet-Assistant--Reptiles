@@ -12,7 +12,6 @@
 #include "esp_log.h"
 #include "driver/i2c_master.h"
 #include "driver/spi_master.h"
-#include "driver/sdspi_host.h"
 #include "driver/gpio.h"
 #include "esp_check.h"
 #include "esp_lcd_panel_io.h"
@@ -21,17 +20,21 @@
 #include "esp_lcd_io_i2c.h"
 #include "esp_lcd_touch.h"
 #include "esp_lcd_touch_gt911.h"
-#include "esp_vfs_fat.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "sdmmc_cmd.h"
 #include "reptile_storage.h"
 #include "esp_rom_sys.h"
 #include "esp_system.h"
 #include "board_io_map.h"
 #include "io_extension_waveshare.h"
-#include "sdspi_ioext_host.h"
 #include "ch422g.h"
+
+#if CONFIG_BOARD_ENABLE_SD
+#include "driver/sdspi_host.h"
+#include "esp_vfs_fat.h"
+#include "sdmmc_cmd.h"
+#include "sdspi_ioext_host.h"
+#endif
 
 static const char *TAG = "BOARD";
 static const char *TAG_I2C = "BOARD_I2C";
@@ -42,17 +45,22 @@ static const char *TAG_IO = "IO_EXT";
 
 static esp_lcd_panel_handle_t s_lcd_panel_handle = NULL;
 static esp_lcd_touch_handle_t s_touch_handle = NULL;
-static sdmmc_card_t *s_card = NULL;
 static i2c_master_bus_handle_t s_i2c_bus_handle = NULL;
 static io_extension_ws_handle_t s_io_ws = NULL;
 static ch422g_handle_t s_ch422 = NULL;
 static bool s_board_has_expander = false;
 static bool s_board_has_lcd = false;
-static sdspi_dev_handle_t s_sdspi_handle = (sdspi_dev_handle_t)-1;
 static uint8_t s_batt_raw_empty = CONFIG_BOARD_BATTERY_RAW_EMPTY;
 static uint8_t s_batt_raw_full = CONFIG_BOARD_BATTERY_RAW_FULL;
 static bool s_logged_expander_absent = false;
 static bool s_logged_batt_unavailable = false;
+
+#if CONFIG_BOARD_ENABLE_SD
+static sdmmc_card_t *s_card = NULL;
+static sdspi_dev_handle_t s_sdspi_handle = (sdspi_dev_handle_t)-1;
+#else
+static void *s_card = NULL;
+#endif
 
 typedef enum {
     IO_DRIVER_NONE = 0,
@@ -92,11 +100,13 @@ static esp_err_t board_load_battery_calibration(void)
     return ESP_ERR_NOT_FOUND;
 }
 
+#if CONFIG_BOARD_ENABLE_SD
 static void board_delay_for_sd(void)
 {
     // Give the card/expander some time to settle before toggling CS
     vTaskDelay(pdMS_TO_TICKS(20));
 }
+#endif
 
 static void board_log_i2c_levels(const char *stage)
 {
@@ -766,6 +776,7 @@ static esp_err_t gt911_detect_i2c_addr(uint8_t *addr_out, bool can_reset)
 // =============================================================================
 // SD Card
 // =============================================================================
+#if CONFIG_BOARD_ENABLE_SD
 
 esp_err_t board_mount_sdcard(void)
 {
@@ -825,7 +836,7 @@ esp_err_t board_mount_sdcard(void)
         spi_bus_owned = false;
         ESP_LOGW(TAG_SD, "SPI bus for host %d already initialized, reusing", BOARD_SD_SPI_HOST);
     } else {
-        ESP_LOGE(TAG_SD, "SPI bus init failed: %s", esp_err_to_name(bus_err));
+        ESP_LOGE(TAG_SD, "Failed to initialize SPI bus for host %d: %s", BOARD_SD_SPI_HOST, esp_err_to_name(bus_err));
         return bus_err;
     }
 
@@ -833,23 +844,24 @@ esp_err_t board_mount_sdcard(void)
         sdspi_dev_handle_t attempt_handle = (sdspi_dev_handle_t)-1;
         sdspi_ioext_config_t ioext_cfg = {
             .spi_host = BOARD_SD_SPI_HOST,
-            .bus_cfg = NULL, // bus is initialized once before the attempts
             .slot_config = slot_config,
-            .max_freq_khz = freq_table_khz[attempt],
             .set_cs_cb = io_expander_sd_cs,
-            .cs_user_ctx = cs_ctx,
-            .cs_setup_delay_us = 5,
-            .cs_hold_delay_us = 5,
-            .initial_clocks = 80,
-            .cs_active_low = true,
-            .pre_clock_bytes = 10,
+            .set_cs_user_ctx = cs_ctx,
+            .hold_cs_low = CONFIG_BOARD_SD_HOLD_CS_LOW_DIAG,
+            .max_freq_khz = freq_table_khz[attempt],
         };
 
-        sdmmc_host_t host = {0};
+        sdmmc_host_t host = SDSPI_HOST_DEFAULT();
+        host.slot = (sdmmc_slot_t)SDSPI_IO_EXTENDER_SLOT;
+        host.flags = SDMMC_HOST_FLAG_SPI;
+        host.command_timeout_ms = 2000;
+        host.max_freq_khz = freq_table_khz[attempt];
+        host.max_freq_io = host.max_freq_khz * 1000;
+
         ret = sdspi_ioext_host_init(&ioext_cfg, &host, &attempt_handle);
         if (ret != ESP_OK) {
-            ESP_LOGW(TAG_SD, "SD host init failed @%dkHz: %s", freq_table_khz[attempt], esp_err_to_name(ret));
-            if ((int)attempt_handle >= 0) {
+            ESP_LOGE(TAG_SD, "sdspi_ioext_host_init attempt %d failed: %s", attempt + 1, esp_err_to_name(ret));
+            if (attempt_handle != (sdspi_dev_handle_t)-1) {
                 sdspi_ioext_host_deinit(attempt_handle, BOARD_SD_SPI_HOST, false);
             }
             continue;
@@ -942,6 +954,14 @@ esp_err_t board_mount_sdcard(void)
     ESP_LOGW(TAG_SD, "SD disabled, continuing without /sdcard (insert card and retry later)");
     return ret;
 }
+#else
+esp_err_t board_mount_sdcard(void)
+{
+    s_card = NULL;
+    ESP_LOGI(TAG_SD, "SD disabled by config");
+    return ESP_ERR_NOT_SUPPORTED;
+}
+#endif
 
 // =============================================================================
 // Public API
@@ -964,11 +984,13 @@ esp_err_t board_init(void)
         status = (status == ESP_OK) ? expander_err : status;
     }
 
+#if CONFIG_BOARD_ENABLE_SD
     esp_err_t sd_err = board_mount_sdcard();
     if (sd_err != ESP_OK) {
         ESP_LOGW(TAG_SD, "SD card not mounted: %s", esp_err_to_name(sd_err));
         s_card = NULL;
     }
+#endif
 
     esp_err_t lcd_err = board_lcd_init();
     if (lcd_err != ESP_OK) {

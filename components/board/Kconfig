@@ -34,6 +34,14 @@ config BOARD_REQUIRE_IO_EXPANDER
         peripherals that rely on the expander (touch reset, SD CS, backlight
         PWM, battery sense).
 
+config BOARD_ENABLE_SD
+    bool "Enable microSD (SDSPI via IO extender)"
+    default n
+    help
+        Enable mounting the microSD card via SDSPI routed through the IO
+        expander. Disable to skip SD initialization entirely when no card is
+        present or during bring-up of unrelated subsystems.
+
 config BOARD_REQUIRE_I2C_OK
     bool "Abort boot if I2C bus is non-functional"
     default n
