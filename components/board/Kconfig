@@ -1,4 +1,4 @@
-menu "Board"
+menu "Board Support"
 
 config BOARD_BATTERY_RAW_FULL
     int "Battery ADC full-scale raw value"
@@ -105,19 +105,16 @@ config BOARD_BACKLIGHT_MAX_DUTY
       driver (résolution LEDC 13 bits).
 
 config BOARD_BACKLIGHT_ACTIVE_LOW
-    bool "Définir à y si la broche de PWM éteint l'écran lorsque le signal est à 1 (active-low)"
+    bool "Backlight PWM active low"
     default n
     help
-      Indique si le signal PWM de rétroéclairage doit être inversé (active-low).
-      Laisser à n pour les cartes Waveshare ESP32-S3 Touch LCD 7B câblées en
-      mode actif-haut, passer à y si le câblage inverse le sens du PWM.
+        Invert PWM polarity for the LCD backlight (active-low enable/inverter).
 
 config BOARD_BACKLIGHT_RAMP_TEST
-    bool "Effectuer ou non un test de rampe de luminosité au démarrage"
+    bool "Backlight ramp test at boot"
     default n
     help
-      Lorsque activé, le rétroéclairage effectue un balayage 0 → 100 % puis
-      100 → 0 % au démarrage pour valider la plage effective de luminosité.
+        If enabled, perform a short brightness ramp test during board init.
 
 endmenu
 

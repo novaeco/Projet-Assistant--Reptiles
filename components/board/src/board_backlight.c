@@ -9,6 +9,13 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#ifndef CONFIG_BOARD_BACKLIGHT_ACTIVE_LOW
+#define CONFIG_BOARD_BACKLIGHT_ACTIVE_LOW 0
+#endif
+#ifndef CONFIG_BOARD_BACKLIGHT_RAMP_TEST
+#define CONFIG_BOARD_BACKLIGHT_RAMP_TEST 0
+#endif
+
 static const char *TAG = "BOARD_BK";
 
 #if defined(LEDC_HIGH_SPEED_MODE)
