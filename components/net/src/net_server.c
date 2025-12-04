@@ -11,6 +11,17 @@
 static const char *TAG = "NET_SERVER";
 static httpd_handle_t server = NULL;
 
+static esp_err_t httpd_resp_send_503(httpd_req_t *req, const char *msg)
+{
+#if defined(HTTPD_503_SERVICE_UNAVAILABLE)
+    return httpd_resp_send_err(req, HTTPD_503_SERVICE_UNAVAILABLE, msg);
+#else
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_send(req, msg, HTTPD_RESP_USE_STRLEN);
+#endif
+}
+
 // =============================================================================
 // Handlers
 // =============================================================================
@@ -49,8 +60,7 @@ static esp_err_t api_animals_handler(httpd_req_t *req)
 static esp_err_t reports_list_handler(httpd_req_t *req)
 {
     if (!board_sd_is_mounted()) {
-        httpd_resp_send_err(req, HTTPD_503_SERVICE_UNAVAILABLE, "SD card unavailable");
-        return ESP_ERR_NOT_SUPPORTED;
+        return httpd_resp_send_503(req, "SD card unavailable");
     }
 
     char **reports = NULL;
@@ -81,8 +91,7 @@ static esp_err_t reports_list_handler(httpd_req_t *req)
 static esp_err_t report_download_handler(httpd_req_t *req)
 {
     if (!board_sd_is_mounted()) {
-        httpd_resp_send_err(req, HTTPD_503_SERVICE_UNAVAILABLE, "SD card unavailable");
-        return ESP_ERR_NOT_SUPPORTED;
+        return httpd_resp_send_503(req, "SD card unavailable");
     }
 
     char filepath[256];
