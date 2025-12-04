@@ -93,24 +93,28 @@ config BOARD_IOEXP_ALLOW_CH422G_FALLBACK
         Waveshare IO extension is selected but not detected. Disable when the
         board is known to only ship the CH32V003 firmware.
 
+menu "Backlight"
+
 config BOARD_BACKLIGHT_MAX_DUTY
-    int "Backlight max duty"
-    range 1 65535
-    default 255
+    int "Valeur maximale du rapport cyclique pour le rétroéclairage (max 4095)"
+    range 1 4095
+    default 4000
     help
-        Valeur max du duty (255 pour PWM 8-bit, 4095 pour LEDC 12-bit, etc.)
+      Rapport cyclique PWM maximal utilisé pour le rétroéclairage.
 
 config BOARD_BACKLIGHT_ACTIVE_LOW
-    bool "Backlight active-low (invert PWM)"
+    bool "Le rétroéclairage est actif à l'état bas"
     default n
     help
-        Inverse la polarité PWM : duty = max_duty - duty.
+      Activer cette option si le signal PWM est inversé (écran actif à 0).
 
 config BOARD_BACKLIGHT_RAMP_TEST
-    bool "Backlight ramp test at boot"
+    bool "Activer un test de rampe de luminosité au démarrage"
     default n
     help
-        À l'initialisation, exécute une rampe 0-100% pour calibration visuelle.
+      Active un test qui augmente puis diminue automatiquement la luminosité au démarrage.
+
+endmenu
 
 config BOARD_BATTERY_ENABLE
     bool "Enable battery sensing via IO expander"

@@ -10,7 +10,6 @@
 #include "sdkconfig.h"
 #include "esp_log.h"
 #include "driver/i2c_master.h"
-#include "driver/spi_master.h"
 #include "driver/gpio.h"
 #include "esp_check.h"
 #include "esp_lcd_panel_io.h"
@@ -826,10 +825,14 @@ esp_err_t board_init(void)
         status = (status == ESP_OK) ? expander_err : status;
     }
 
+#if CONFIG_BOARD_ENABLE_SD
     esp_err_t sd_err = board_mount_sdcard();
     if (sd_err != ESP_OK && sd_err != ESP_ERR_NOT_SUPPORTED) {
         ESP_LOGI(TAG_SD, "SD mount skipped: %s", esp_err_to_name(sd_err));
     }
+#else
+    ESP_LOGI(TAG_SD, "SD init disabled by Kconfig (CONFIG_BOARD_ENABLE_SD=n)");
+#endif
 
     esp_err_t lcd_err = board_lcd_init();
     if (lcd_err != ESP_OK) {
@@ -844,7 +847,7 @@ esp_err_t board_init(void)
         status = (status == ESP_OK) ? touch_err : status;
     }
 
-    const board_backlight_init_config_t backlight_cfg = {
+    const board_backlight_config_t backlight_cfg = {
         .max_duty = CONFIG_BOARD_BACKLIGHT_MAX_DUTY,
         .active_low = CONFIG_BOARD_BACKLIGHT_ACTIVE_LOW,
         .ramp_test = CONFIG_BOARD_BACKLIGHT_RAMP_TEST,

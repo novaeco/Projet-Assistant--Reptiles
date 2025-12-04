@@ -9,13 +9,25 @@ extern "C" {
 #endif
 
 typedef struct {
-    uint16_t max_duty;
-    bool active_low;
-    bool ramp_test;
-} board_backlight_init_config_t;
+    uint16_t max_duty;   /*!< Duty cycle upper bound (0..CONFIG_BOARD_BACKLIGHT_MAX_DUTY) */
+    bool active_low;     /*!< Invert PWM output (true if backlight is enabled when the pin is low) */
+    bool ramp_test;      /*!< Run an automatic ramp sequence at startup */
+} board_backlight_config_t;
 
-esp_err_t board_backlight_init(const board_backlight_init_config_t *config);
+/**
+ * @brief Initialise le rétroéclairage à l'aide du périphérique LEDC.
+ *
+ * @param cfg Configuration du rétroéclairage (NULL pour utiliser les valeurs Kconfig).
+ * @return ESP_OK si l'initialisation s'est déroulée correctement, sinon un code d'erreur ESP-IDF.
+ */
+esp_err_t board_backlight_init(const board_backlight_config_t *cfg);
 
+/**
+ * @brief Régler la luminosité du rétroéclairage.
+ *
+ * @param percent Valeur comprise entre 0 et 100 représentant la luminosité souhaitée.
+ * @return ESP_OK en cas de succès, sinon un code d'erreur LEDC/IO expander.
+ */
 esp_err_t board_backlight_set_percent(uint8_t percent);
 
 #ifdef __cplusplus
