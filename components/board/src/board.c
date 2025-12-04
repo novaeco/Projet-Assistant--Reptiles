@@ -766,6 +766,8 @@ esp_err_t board_mount_sdcard(void)
     }
 
     ESP_LOGI(TAG_SD, "Initializing SD Card via SPI (CS=EXIO4 via IO extender)...");
+    ESP_LOGI(TAG_SD, "SPI pins: MOSI=%d MISO=%d CLK=%d (host=%d)",
+             BOARD_SD_MOSI, BOARD_SD_MISO, BOARD_SD_CLK, BOARD_SD_SPI_HOST);
 
     spi_bus_config_t bus_cfg = {0};
     bus_cfg.mosi_io_num = BOARD_SD_MOSI;
@@ -943,6 +945,12 @@ esp_err_t board_init(void)
         status = (status == ESP_OK) ? expander_err : status;
     }
 
+    esp_err_t sd_err = board_mount_sdcard();
+    if (sd_err != ESP_OK) {
+        ESP_LOGW(TAG_SD, "SD card not mounted: %s", esp_err_to_name(sd_err));
+        s_card = NULL;
+    }
+
     esp_err_t lcd_err = board_lcd_init();
     if (lcd_err != ESP_OK) {
         ESP_LOGE(TAG, "LCD init failed: %s", esp_err_to_name(lcd_err));
@@ -954,12 +962,6 @@ esp_err_t board_init(void)
         ESP_LOGW(TAG_TOUCH, "Touch init failed: %s (touch disabled)", esp_err_to_name(touch_err));
         s_touch_handle = NULL;
         status = (status == ESP_OK) ? touch_err : status;
-    }
-
-    esp_err_t sd_err = board_mount_sdcard();
-    if (sd_err != ESP_OK) {
-        ESP_LOGW(TAG_SD, "SD card not mounted: %s", esp_err_to_name(sd_err));
-        s_card = NULL;
     }
 
     esp_err_t calib_err = board_load_battery_calibration();

@@ -15,6 +15,8 @@ static bool is_connected = false;
 static bool has_credentials = false;
 static esp_timer_handle_t s_wifi_retry_timer = NULL;
 static uint32_t s_wifi_backoff_ms = 1000; // start at 1s
+static const char *DEFAULT_WIFI_SSID = "MY_SSID";
+static const char *DEFAULT_WIFI_PASSWORD = "MY_PASS";
 
 static void wifi_retry_cb(void *arg)
 {
@@ -80,6 +82,14 @@ esp_err_t net_init(void)
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    // Apply debug credentials so the station connects immediately when no NVS entries are present
+    wifi_config_t wifi_config = {0};
+    strncpy((char *)wifi_config.sta.ssid, DEFAULT_WIFI_SSID, sizeof(wifi_config.sta.ssid));
+    strncpy((char *)wifi_config.sta.password, DEFAULT_WIFI_PASSWORD, sizeof(wifi_config.sta.password));
+    ESP_LOGI(TAG, "Applying debug Wi-Fi credentials (SSID='%s')", DEFAULT_WIFI_SSID);
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    has_credentials = (strlen(DEFAULT_WIFI_SSID) > 0);
 
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
                                                         ESP_EVENT_ANY_ID,
