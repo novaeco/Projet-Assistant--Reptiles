@@ -75,13 +75,13 @@ static void sdspi_ioext_unlock_ctx_array(void)
     }
 }
 
-static sdspi_ioext_context_t *sdspi_ioext_get_ctx(int slot)
+static sdspi_ioext_context_t *sdspi_ioext_get_ctx(sdspi_dev_handle_t handle)
 {
-    const sdspi_dev_handle_t key = (sdspi_dev_handle_t)slot;
-    ESP_LOGD(TAG, "Resolve ctx for slot=0x%08x (%d)", (unsigned)sdspi_ioext_handle_value(key), (int)key);
+    const sdspi_dev_handle_t key = handle;
+    ESP_LOGD(TAG, "Resolve ctx for handle=0x%08x (%d)", (unsigned)sdspi_ioext_handle_value(key), (int)key);
 
     if (key == 0) {
-        ESP_LOGE(TAG, "do_transaction slot mismatch (got null/zero slot)");
+        ESP_LOGE(TAG, "do_transaction slot mismatch (got zero handle)");
         return NULL;
     }
 
@@ -100,7 +100,7 @@ static sdspi_ioext_context_t *sdspi_ioext_get_ctx(int slot)
     }
 
     if (!found) {
-        ESP_LOGE(TAG, "do_transaction slot mismatch (slot=0x%08x %d)", (unsigned)key, (int)key);
+        ESP_LOGE(TAG, "do_transaction slot mismatch (handle=0x%08x %d)", (unsigned)key, (int)key);
         ESP_LOGE(TAG, "Known ctx keys:");
         if (sdspi_ioext_lock_ctx_array(portMAX_DELAY)) {
             for (int i = 0; i < SDSPI_IOEXT_MAX_HOSTS; ++i) {
@@ -172,9 +172,11 @@ static esp_err_t sdspi_ioext_send_initial_clocks(sdspi_ioext_context_t *ctx)
     return ESP_OK;
 }
 
-static esp_err_t sdspi_ioext_do_transaction(int slot, sdmmc_command_t *cmd)
+static esp_err_t sdspi_ioext_do_transaction(sdspi_dev_handle_t handle, sdmmc_command_t *cmd)
 {
-    sdspi_ioext_context_t *ctx = sdspi_ioext_get_ctx(slot);
+    static bool s_first_transaction_logged = false;
+
+    sdspi_ioext_context_t *ctx = sdspi_ioext_get_ctx(handle);
     if (!ctx) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -183,32 +185,49 @@ static esp_err_t sdspi_ioext_do_transaction(int slot, sdmmc_command_t *cmd)
         xSemaphoreTake(ctx->lock, portMAX_DELAY);
     }
 
-    sdspi_dev_handle_t handle = ctx->device;
     ESP_LOGD(TAG,
-             "do_transaction(slot=0x%08x (%d) handle=0x%08x cmd=%d flags=0x%x ctx_device=0x%08x ctx_slot=0x%08x)",
-             (unsigned)slot, slot, (unsigned)sdspi_ioext_handle_value(handle), cmd ? cmd->opcode : -1,
-             cmd ? cmd->flags : 0, ctx ? (unsigned)sdspi_ioext_handle_value(ctx->device) : 0,
+             "do_transaction(handle=0x%08x (%d) cmd=%d flags=0x%x ctx_device=0x%08x ctx_slot=0x%08x)",
+             (unsigned)sdspi_ioext_handle_value(handle), (int)sdspi_ioext_handle_value(handle),
+             cmd ? cmd->opcode : -1, cmd ? cmd->flags : 0,
+             ctx ? (unsigned)sdspi_ioext_handle_value(ctx->device) : 0,
              ctx ? (unsigned)sdspi_ioext_handle_value(ctx->slot_handle) : 0);
 
-    ESP_RETURN_ON_ERROR(sdspi_ioext_send_initial_clocks(ctx), TAG, "initial clocks failed");
+    if (!s_first_transaction_logged) {
+        s_first_transaction_logged = true;
+        ESP_LOGD(TAG, "first transaction: handle=%d (0x%08x) cmd=%p opcode=%d arg=0x%08" PRIx32 " flags=0x%x",
+                 (int)sdspi_ioext_handle_value(handle), (unsigned)sdspi_ioext_handle_value(handle), (void *)cmd,
+                 cmd ? cmd->opcode : -1, cmd ? cmd->arg : 0, cmd ? cmd->flags : 0);
+    }
+
+    bool cs_asserted = false;
+    esp_err_t ret = sdspi_ioext_send_initial_clocks(ctx);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "initial clocks failed: %s", esp_err_to_name(ret));
+        goto cleanup;
+    }
+
     sdspi_ioext_toggle_cs(ctx, true);
+    cs_asserted = true;
     if (ctx->cfg.cs_setup_delay_us) {
         esp_rom_delay_us(ctx->cfg.cs_setup_delay_us);
     }
 
-    esp_err_t ret = sdspi_host_do_transaction(handle, cmd);
+    ret = sdspi_host_do_transaction(handle, cmd);
 
-    if (ctx->cfg.cs_hold_delay_us) {
+cleanup:
+    if (ctx && ctx->cfg.cs_hold_delay_us && cs_asserted) {
         esp_rom_delay_us(ctx->cfg.cs_hold_delay_us);
     }
-    sdspi_ioext_toggle_cs(ctx, false);
-
+    if (ctx && cs_asserted) {
+        sdspi_ioext_toggle_cs(ctx, false);
+    }
     if (ctx->lock) {
         xSemaphoreGive(ctx->lock);
     }
 
     if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "SPI transaction failed (slot=%d cmd=%d): %s", slot, cmd ? cmd->opcode : -1, esp_err_to_name(ret));
+        ESP_LOGW(TAG, "SPI transaction failed (handle=%d cmd=%d): %s", (int)sdspi_ioext_handle_value(handle),
+                 cmd ? cmd->opcode : -1, esp_err_to_name(ret));
     }
 
     return ret;
