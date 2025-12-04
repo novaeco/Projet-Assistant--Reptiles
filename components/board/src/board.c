@@ -394,14 +394,30 @@ static esp_err_t io_expander_sd_cs(bool assert, void *ctx)
 
     bool level = !assert; // Active-low CS
     ESP_LOGD(TAG_SD, "IOEXT SD CS %s (level=%d)", assert ? "ASSERT" : "DEASSERT", (int)level);
+    esp_err_t err = ESP_OK;
     if (ctx == s_io_ws && s_io_driver == IO_DRIVER_WAVESHARE) {
-        return io_extension_ws_set_output(s_io_ws, IO_EXP_PIN_SD_CS, level);
+        err = io_extension_ws_set_output(s_io_ws, IO_EXP_PIN_SD_CS, level);
+        if (err == ESP_OK) {
+            uint8_t inputs = 0;
+            esp_err_t check = io_extension_ws_read_inputs(s_io_ws, &inputs);
+            if (check == ESP_OK) {
+                bool observed = (inputs & (1U << IO_EXP_PIN_SD_CS)) != 0;
+                if (observed != level) {
+                    ESP_LOGW(TAG_SD, "IOEXT SD CS readback mismatch (expected %d, got %d)", (int)level, (int)observed);
+                }
+            } else {
+                ESP_LOGW(TAG_SD, "IOEXT SD CS readback skipped: %s", esp_err_to_name(check));
+            }
+        }
+        return err;
     }
     if (ctx == s_ch422 && s_io_driver == IO_DRIVER_CH422) {
-        return ch422g_set_output_level(s_ch422, IO_EXP_PIN_SD_CS, level);
+        err = ch422g_set_output_level(s_ch422, IO_EXP_PIN_SD_CS, level);
+        return err;
     }
 
-    return io_expander_set_output(IO_EXP_PIN_SD_CS, level);
+    err = io_expander_set_output(IO_EXP_PIN_SD_CS, level);
+    return err;
 }
 
 static esp_err_t board_io_expander_post_init_defaults(void)
@@ -814,9 +830,10 @@ esp_err_t board_mount_sdcard(void)
     }
 
     for (size_t attempt = 0; attempt < max_attempts; ++attempt) {
+        sdspi_dev_handle_t attempt_handle = (sdspi_dev_handle_t)-1;
         sdspi_ioext_config_t ioext_cfg = {
             .spi_host = BOARD_SD_SPI_HOST,
-            .bus_cfg = (attempt == 0) ? &bus_cfg : NULL, // ensure first attempt initializes bus in correct order
+            .bus_cfg = NULL, // bus is initialized once before the attempts
             .slot_config = slot_config,
             .max_freq_khz = freq_table_khz[attempt],
             .set_cs_cb = io_expander_sd_cs,
@@ -829,11 +846,16 @@ esp_err_t board_mount_sdcard(void)
         };
 
         sdmmc_host_t host = {0};
-        ret = sdspi_ioext_host_init(&ioext_cfg, &host, &s_sdspi_handle);
+        ret = sdspi_ioext_host_init(&ioext_cfg, &host, &attempt_handle);
         if (ret != ESP_OK) {
             ESP_LOGW(TAG_SD, "SD host init failed @%dkHz: %s", freq_table_khz[attempt], esp_err_to_name(ret));
+            if ((int)attempt_handle >= 0) {
+                sdspi_ioext_host_deinit(attempt_handle, BOARD_SD_SPI_HOST, false);
+            }
             continue;
         }
+
+        s_sdspi_handle = attempt_handle;
 
         ESP_LOGI(TAG_SD, "SDSPI device handle=%d host.slot=%d (attempt=%d)",
                  (int)s_sdspi_handle, host.slot, (int)(attempt + 1));
