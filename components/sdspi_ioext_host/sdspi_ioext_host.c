@@ -31,7 +31,6 @@ typedef struct {
   bool sent_initial_clocks;
   spi_host_device_t host_id;
   int ctx_index;
-  int handle;
   bool bus_initialized;
   bool in_use;
   SemaphoreHandle_t lock;
@@ -180,7 +179,9 @@ static esp_err_t sdspi_ioext_do_transaction(int slot, sdmmc_command_t *cmd) {
 
   ESP_LOGD(TAG, "do_transaction entry slot=%d (0x%08x)", slot, slot);
 
-  sdspi_ioext_context_t *ctx = sdspi_ioext_get_ctx_by_device(slot);
+  const sdspi_dev_handle_t dev = (sdspi_dev_handle_t)slot;
+
+  sdspi_ioext_context_t *ctx = sdspi_ioext_get_ctx_by_device(dev);
   if (!ctx) {
     ESP_LOGE(TAG, "SDSPI context unavailable for transaction (slot=%d)", slot);
     return ESP_ERR_INVALID_STATE;
@@ -347,7 +348,6 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config,
   ctx->cfg.max_freq_khz = config->max_freq_khz;
   ctx->sent_initial_clocks = false;
   ctx->host_id = host_id;
-  ctx->handle = (int)device_handle;
   ctx->bus_initialized = bus_initialized_here;
   ctx->lock = xSemaphoreCreateMutex();
   if (!ctx->lock) {
