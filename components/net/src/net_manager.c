@@ -3,6 +3,7 @@
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_err.h"
 #include "nvs_flash.h"
 #include "esp_netif.h"
 #include "esp_sntp.h"
@@ -21,10 +22,21 @@ static const char *DEFAULT_WIFI_PASSWORD = "MY_PASS";
 static esp_err_t apply_sta_config_with_recovery(const wifi_config_t *wifi_config_in)
 {
     if (wifi_config_in == NULL) {
+        ESP_LOGE(TAG, "Cannot apply STA config: null input");
         return ESP_ERR_INVALID_ARG;
     }
 
     wifi_mode_t current_mode = WIFI_MODE_MAX;
+    esp_err_t err = esp_wifi_get_mode(&current_mode);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "esp_wifi_get_mode failed: %s", esp_err_to_name(err));
+        // Continue with WIFI_MODE_MAX in logs; recovery below will reset mode as needed
+    }
+    wifi_config_t cfg = *wifi_config_in;
+
+    ESP_LOGI(TAG, "Applying STA config (mode=%d)", (int)current_mode);
+
+    err = esp_wifi_set_config(WIFI_IF_STA, &cfg);
     esp_wifi_get_mode(&current_mode);
     wifi_config_t cfg = *wifi_config_in;
 
