@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "sdkconfig.h"
 #include "esp_err.h"
 
 #ifdef __cplusplus
@@ -10,6 +11,8 @@ extern "C" {
 
 typedef struct {
     uint16_t max_duty;   /*!< Duty cycle upper bound (0..CONFIG_BOARD_BACKLIGHT_MAX_DUTY) */
+    bool active_low;     /*!< True si le signal PWM doit être inversé (CONFIG_BOARD_BACKLIGHT_ACTIVE_LOW) */
+    bool ramp_test;      /*!< Active le test de rampe de luminosité au démarrage */
 } board_backlight_config_t;
 
 /**
