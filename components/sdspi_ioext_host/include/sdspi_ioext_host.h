@@ -1,9 +1,10 @@
 #pragma once
 
-#include "esp_err.h"
 #include "driver/sdmmc_host.h"
 #include "driver/sdspi_host.h"
 #include "driver/spi_master.h"
+#include "esp_err.h"
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -21,6 +22,8 @@ typedef struct {
     uint32_t cs_setup_delay_us;
     uint32_t cs_hold_delay_us;
     uint32_t initial_clocks;
+    bool cs_active_low;
+    uint8_t pre_clock_bytes;
 } sdspi_ioext_config_t;
 
 esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config, sdmmc_host_t *host_out, sdspi_dev_handle_t *device_out);
