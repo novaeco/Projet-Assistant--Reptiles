@@ -35,12 +35,13 @@ config BOARD_REQUIRE_IO_EXPANDER
         PWM, battery sense).
 
 config BOARD_ENABLE_SD
-    bool "Enable microSD (SDSPI via IO extender)"
+    bool "Enable microSD (disabled)"
     default n
     help
-        Enable mounting the microSD card via SDSPI routed through the IO
-        expander. Disable to skip SD initialization entirely when no card is
-        present or during bring-up of unrelated subsystems.
+        microSD support is permanently disabled in firmware to avoid crashes
+        linked to the IO extender. This option remains for compatibility but
+        always evaluates to false at runtime; the board will never attempt to
+        mount /sdcard.
 
 config BOARD_REQUIRE_I2C_OK
     bool "Abort boot if I2C bus is non-functional"
