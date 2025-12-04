@@ -7,6 +7,22 @@
 #include "freertos/task.h"
 #include "sdkconfig.h"
 
+#ifndef CONFIG_BOARD_BACKLIGHT_MAX_DUTY
+#define CONFIG_BOARD_BACKLIGHT_MAX_DUTY 255
+#endif
+
+#ifdef CONFIG_BOARD_BACKLIGHT_ACTIVE_LOW
+#define BOARD_BL_ACTIVE_LOW 1
+#else
+#define BOARD_BL_ACTIVE_LOW 0
+#endif
+
+#ifdef CONFIG_BOARD_BACKLIGHT_RAMP_TEST
+#define BOARD_BL_RAMP_TEST 1
+#else
+#define BOARD_BL_RAMP_TEST 0
+#endif
+
 static const char *TAG = "BOARD_BK";
 
 static const char *board_backlight_driver_label(board_io_driver_t drv)
@@ -59,9 +75,13 @@ esp_err_t board_backlight_set_percent(uint8_t percent)
         return ESP_ERR_INVALID_ARG;
     }
 
-    uint16_t duty = (uint16_t)(((uint32_t)percent * max_duty + 50) / 100);
-    if (CONFIG_BOARD_BACKLIGHT_ACTIVE_LOW) {
-        duty = max_duty - duty;
+    uint32_t duty = ((uint32_t)percent * (uint32_t)CONFIG_BOARD_BACKLIGHT_MAX_DUTY + 50u) / 100u;
+    if (duty > (uint32_t)CONFIG_BOARD_BACKLIGHT_MAX_DUTY) {
+        duty = (uint32_t)CONFIG_BOARD_BACKLIGHT_MAX_DUTY;
+    }
+
+    if (BOARD_BL_ACTIVE_LOW) {
+        duty = (uint32_t)CONFIG_BOARD_BACKLIGHT_MAX_DUTY - duty;
     }
 
     bool enable = percent > 0;
@@ -77,12 +97,13 @@ esp_err_t board_backlight_set_percent(uint8_t percent)
     ESP_LOGI(TAG, "Backlight %u%% -> duty=%u/%u (raw=%u) driver=%s active_low=%d enables:LCD_VDD=on BK=%s",
              percent, duty, max_duty, (unsigned)applied_raw,
              board_backlight_driver_label(driver),
-             CONFIG_BOARD_BACKLIGHT_ACTIVE_LOW ? 1 : 0,
+             BOARD_BL_ACTIVE_LOW,
              enable ? "on" : "off");
 
     return ESP_OK;
 }
 
+#if BOARD_BL_RAMP_TEST
 static void board_backlight_run_ramp(void)
 {
     ESP_LOGI(TAG, "Starting backlight ramp test (0->100%% step=10%%)");
@@ -92,6 +113,7 @@ static void board_backlight_run_ramp(void)
         vTaskDelay(pdMS_TO_TICKS(500));
     }
 }
+#endif
 
 esp_err_t board_backlight_init(void)
 {
@@ -103,10 +125,10 @@ esp_err_t board_backlight_init(void)
     ESP_LOGI(TAG, "Backlight backend=%s max_duty=%u active_low=%d ramp_test=%d",
              board_backlight_driver_label(board_internal_get_io_driver()),
              (unsigned)CONFIG_BOARD_BACKLIGHT_MAX_DUTY,
-             CONFIG_BOARD_BACKLIGHT_ACTIVE_LOW ? 1 : 0,
-             CONFIG_BOARD_BACKLIGHT_RAMP_TEST ? 1 : 0);
+             BOARD_BL_ACTIVE_LOW,
+             BOARD_BL_RAMP_TEST);
 
-#if CONFIG_BOARD_BACKLIGHT_RAMP_TEST
+#if BOARD_BL_RAMP_TEST
     board_backlight_run_ramp();
 #endif
 
