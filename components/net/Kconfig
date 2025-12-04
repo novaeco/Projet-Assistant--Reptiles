@@ -1,0 +1,15 @@
+menu "Network Manager"
+
+config NET_WIFI_SSID
+    string "Default WiFi SSID"
+    default ""
+    help
+        Optional Wi-Fi SSID used when no credentials are provisioned in NVS (namespace "net").
+
+config NET_WIFI_PASS
+    string "Default WiFi password"
+    default ""
+    help
+        Optional Wi-Fi password used when no credentials are provisioned in NVS (namespace "net").
+
+endmenu
