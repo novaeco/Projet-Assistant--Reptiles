@@ -1,4 +1,4 @@
-menu "Board configuration"
+menu "Board"
 
 config BOARD_BATTERY_RAW_FULL
     int "Battery ADC full-scale raw value"
@@ -93,29 +93,23 @@ config BOARD_IOEXP_ALLOW_CH422G_FALLBACK
         board is known to only ship the CH32V003 firmware.
 
 config BOARD_BACKLIGHT_MAX_DUTY
-    int "Backlight PWM maximum duty"
+    int "Backlight max duty"
     range 1 65535
     default 255
     help
-        Raw maximum duty value written by board_backlight_set_percent(). For
-        LEDC-driven panels (12-bit) use 4095. For the Waveshare IO expander
-        backend (8-bit) keep 255 to map 100%% to 0xFF.
+        Valeur max du duty (255 pour PWM 8-bit, 4095 pour LEDC 12-bit, etc.)
 
 config BOARD_BACKLIGHT_ACTIVE_LOW
-    bool "Invert backlight PWM (active-low)"
+    bool "Backlight active-low (invert PWM)"
     default n
     help
-        Enable when the panel backlight PWM input is active-low. The driver will
-        invert the computed duty so 100%% corresponds to raw duty 0.
+        Inverse la polarité PWM : duty = max_duty - duty.
 
 config BOARD_BACKLIGHT_RAMP_TEST
-    bool "Run backlight ramp test at boot"
+    bool "Backlight ramp test at boot"
     default n
     help
-        When enabled, board_backlight_init() will sweep the brightness from 0%%
-        to 100%% in 10%% steps with 500 ms delay. Each step logs the requested
-        percent, raw duty and backend flags to ease calibration and visual
-        validation.
+        À l'initialisation, exécute une rampe 0-100% pour calibration visuelle.
 
 config BOARD_BATTERY_ENABLE
     bool "Enable battery sensing via IO expander"
