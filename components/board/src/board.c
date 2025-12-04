@@ -7,6 +7,8 @@
 #include <stdint.h>
 #include <inttypes.h>
 #include "board.h"
+#include "board_backlight.h"
+#include "board_internal.h"
 #include "board_pins.h"
 #include "sdkconfig.h"
 #include "esp_log.h"
@@ -381,14 +383,14 @@ static esp_err_t io_expander_set_output(uint8_t pin, bool level)
     }
 }
 
-static esp_err_t io_expander_set_pwm(uint8_t duty)
+static esp_err_t io_expander_set_pwm_raw(uint8_t duty)
 {
     if (!s_board_has_expander) {
         return ESP_ERR_INVALID_STATE;
     }
     switch (s_io_driver) {
     case IO_DRIVER_WAVESHARE:
-        return io_extension_ws_set_pwm_percent(s_io_ws, duty);
+        return io_extension_ws_set_pwm_raw(s_io_ws, duty);
     case IO_DRIVER_CH422:
         return io_expander_set_output(IO_EXP_PIN_BK, duty != 0);
     default:
@@ -441,10 +443,55 @@ static esp_err_t board_io_expander_post_init_defaults(void)
     vTaskDelay(pdMS_TO_TICKS(5));
     ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_RST, true), TAG_IO, "LCD_RST high failed");
     vTaskDelay(pdMS_TO_TICKS(10));
-    ESP_RETURN_ON_ERROR(io_expander_set_pwm(100), TAG_IO, "PWM init failed");
 
     uint16_t cached = io_expander_cached_state();
     ESP_LOGI(TAG_IO, "IO expander defaults applied (state=0x%04X)", (unsigned)cached);
+    return ESP_OK;
+}
+
+board_io_driver_t board_internal_get_io_driver(void)
+{
+    return (board_io_driver_t)s_io_driver;
+}
+
+bool board_internal_has_expander(void)
+{
+    return s_board_has_expander;
+}
+
+esp_err_t board_internal_set_output(uint8_t pin, bool level)
+{
+    return io_expander_set_output(pin, level);
+}
+
+esp_err_t board_internal_set_pwm_raw(uint16_t duty, uint16_t max_duty, uint8_t *applied_raw_out)
+{
+    if (!s_board_has_expander) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (max_duty == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint16_t clamped = (duty > max_duty) ? max_duty : duty;
+    uint8_t raw = 0;
+
+    switch (s_io_driver) {
+    case IO_DRIVER_WAVESHARE:
+        raw = (uint8_t)(((uint32_t)clamped * 255U + max_duty / 2U) / max_duty);
+        ESP_RETURN_ON_ERROR(io_expander_set_pwm_raw(raw), TAG_IO, "Waveshare PWM write failed");
+        break;
+    case IO_DRIVER_CH422:
+        raw = clamped ? 1 : 0;
+        ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_BK, raw != 0), TAG_IO, "CH422G backlight write failed");
+        break;
+    default:
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (applied_raw_out) {
+        *applied_raw_out = raw;
+    }
     return ESP_OK;
 }
 
@@ -1005,6 +1052,12 @@ esp_err_t board_init(void)
         status = (status == ESP_OK) ? touch_err : status;
     }
 
+    esp_err_t backlight_err = board_backlight_init();
+    if (backlight_err != ESP_OK && backlight_err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGW(TAG, "Backlight init reported: %s", esp_err_to_name(backlight_err));
+        status = (status == ESP_OK) ? backlight_err : status;
+    }
+
     esp_err_t calib_err = board_load_battery_calibration();
     if (calib_err != ESP_OK) {
         ESP_LOGW(TAG, "Battery calibration defaults in use (%u-%u) (err=%s)",
@@ -1036,23 +1089,7 @@ esp_err_t board_init(void)
 
 esp_err_t board_set_backlight_percent(uint8_t percent)
 {
-    if (percent > 100) {
-        percent = 100;
-    }
-    if (!s_board_has_expander) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    if (s_io_driver == IO_DRIVER_WAVESHARE) {
-        ESP_LOGI(TAG, "Backlight set to %u%% via Waveshare PWM", percent);
-        return io_expander_set_pwm(percent);
-    }
-    // CH422G lacks PWM, fall back to digital
-    ESP_LOGI(TAG, "Backlight set to %u%% (digital) via CH422G", percent);
-    esp_err_t err = io_expander_set_output(IO_EXP_PIN_BK, percent > 0);
-    if (err != ESP_OK) {
-        return err;
-    }
-    return ESP_OK;
+    return board_backlight_set_percent(percent);
 }
 
 esp_err_t board_io_expander_read_inputs(uint8_t *inputs)
