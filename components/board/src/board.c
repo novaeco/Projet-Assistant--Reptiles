@@ -849,8 +849,6 @@ esp_err_t board_init(void)
 
     const board_backlight_config_t backlight_cfg = {
         .max_duty = CONFIG_BOARD_BACKLIGHT_MAX_DUTY,
-        .active_low = CONFIG_BOARD_BACKLIGHT_ACTIVE_LOW,
-        .ramp_test = CONFIG_BOARD_BACKLIGHT_RAMP_TEST,
     };
 
     esp_err_t backlight_err = board_backlight_init(&backlight_cfg);

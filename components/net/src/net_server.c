@@ -3,6 +3,7 @@
 #include "esp_log.h"
 #include "core_service.h"
 #include "cJSON.h"
+#include "board.h"
 #include <sys/stat.h>
 #include <dirent.h>
 #include <stdio.h>
@@ -47,6 +48,11 @@ static esp_err_t api_animals_handler(httpd_req_t *req)
 // GET /reports
 static esp_err_t reports_list_handler(httpd_req_t *req)
 {
+    if (!board_sd_is_mounted()) {
+        httpd_resp_send_err(req, HTTPD_503_SERVICE_UNAVAILABLE, "SD card unavailable");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
     char **reports = NULL;
     size_t count = 0;
     
@@ -74,6 +80,11 @@ static esp_err_t reports_list_handler(httpd_req_t *req)
 // GET /reports/*
 static esp_err_t report_download_handler(httpd_req_t *req)
 {
+    if (!board_sd_is_mounted()) {
+        httpd_resp_send_err(req, HTTPD_503_SERVICE_UNAVAILABLE, "SD card unavailable");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
     char filepath[256];
     // Skip "/reports/" prefix (length 9)
     snprintf(filepath, sizeof(filepath), "/sdcard/reports/%s", req->uri + 9);

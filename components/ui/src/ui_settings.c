@@ -55,6 +55,11 @@ static void save_pin_cb(lv_event_t * e)
 
 static void export_cb(lv_event_t * e)
 {
+    if (!board_sd_is_mounted()) {
+        ui_msgbox_notify("SD desactivee", "Aucune carte SD montee. Export indisponible.");
+        return;
+    }
+
     if (core_export_csv("/sdcard/export.csv") == ESP_OK) {
         ui_msgbox_notify("Succes", "Export CSV termine:\n/sdcard/export.csv");
     } else {

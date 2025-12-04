@@ -96,23 +96,11 @@ config BOARD_IOEXP_ALLOW_CH422G_FALLBACK
 menu "Backlight"
 
 config BOARD_BACKLIGHT_MAX_DUTY
-    int "Valeur maximale du rapport cyclique pour le rétroéclairage (max 4095)"
-    range 1 4095
-    default 4000
+    int "Valeur maximale du rapport cyclique pour le rétroéclairage (max 8192)"
+    range 1 8192
+    default 8192
     help
-      Rapport cyclique PWM maximal utilisé pour le rétroéclairage.
-
-config BOARD_BACKLIGHT_ACTIVE_LOW
-    bool "Le rétroéclairage est actif à l'état bas"
-    default n
-    help
-      Activer cette option si le signal PWM est inversé (écran actif à 0).
-
-config BOARD_BACKLIGHT_RAMP_TEST
-    bool "Activer un test de rampe de luminosité au démarrage"
-    default n
-    help
-      Active un test qui augmente puis diminue automatiquement la luminosité au démarrage.
+      Rapport cyclique PWM maximal utilisé pour le rétroéclairage (résolution LEDC 13 bits).
 
 endmenu
 

@@ -23,7 +23,7 @@ idf.py -p /dev/ttyUSB0 flash monitor
 - Écran RGB 1024×600 : fréquence PCLK fixée à 27 MHz pour une stabilité conforme aux spécifications Waveshare.
 - Tactile GT911 (I2C) : géré via `esp_lcd_touch_gt911`.
 - Rétroéclairage : réglable 0–100 % via `board_set_backlight_percent()` et le slider UI Paramètres.
-- SD SPI : montée sur `/sdcard` si présente.
+- SD SPI : désactivée (instabilité de la CS sur l'IO expander Waveshare).
 - Batterie : lecture 0–100 % via l’expandeur CH32V003, affichée dans l’en-tête du tableau de bord.
 
 ## Dépannage

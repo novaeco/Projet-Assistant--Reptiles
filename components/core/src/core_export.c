@@ -1,10 +1,15 @@
 #include "core_export.h"
 #include "core_service.h"
 #include "core_models.h"
+#include "board.h"
 #include <stdio.h>
 
 esp_err_t core_export_csv(const char *filename)
 {
+    if (!board_sd_is_mounted()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
     FILE *f = fopen(filename, "w");
     if (!f) return ESP_FAIL;
 

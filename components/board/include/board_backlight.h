@@ -10,8 +10,6 @@ extern "C" {
 
 typedef struct {
     uint16_t max_duty;   /*!< Duty cycle upper bound (0..CONFIG_BOARD_BACKLIGHT_MAX_DUTY) */
-    bool active_low;     /*!< Invert PWM output (true if backlight is enabled when the pin is low) */
-    bool ramp_test;      /*!< Run an automatic ramp sequence at startup */
 } board_backlight_config_t;
 
 /**
