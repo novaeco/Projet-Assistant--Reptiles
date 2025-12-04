@@ -824,6 +824,8 @@ esp_err_t board_mount_sdcard(void)
             .cs_setup_delay_us = 5,
             .cs_hold_delay_us = 5,
             .initial_clocks = 80,
+            .cs_active_low = true,
+            .pre_clock_bytes = 10,
         };
 
         sdmmc_host_t host = {0};
