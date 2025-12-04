@@ -1,8 +1,10 @@
 #include "core_service.h"
 #include "reptile_storage.h"
+#include "board.h"
 #include "esp_log.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include <time.h>
 #include <sys/stat.h>
 #include <dirent.h>
@@ -15,14 +17,31 @@ static const char *TAG = "CORE";
 #define LOG_FILE   "/sdcard/audit.log"
 #define FILEPATH_BUF_LEN 512
 
-static void ensure_dirs(void) {
+static bool s_storage_ready = false;
+
+static bool core_storage_ready(void) {
+    return s_storage_ready;
+}
+
+static esp_err_t ensure_dirs(void) {
+    if (!core_storage_ready()) {
+        ESP_LOGW(TAG, "Skipping directory creation: SD storage unavailable");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     struct stat st = {0};
     if (stat(ANIMAL_DIR, &st) == -1) mkdir(ANIMAL_DIR, 0700);
     if (stat(REPORT_DIR, &st) == -1) mkdir(REPORT_DIR, 0700);
+    return ESP_OK;
 }
 
 esp_err_t core_init(void) {
     ESP_LOGI(TAG, "Initializing Core Service...");
+    s_storage_ready = board_sd_is_mounted();
+    if (!s_storage_ready) {
+        ESP_LOGW(TAG, "Core storage disabled: SD not mounted");
+        return ESP_OK;
+    }
+
     ensure_dirs();
     return ESP_OK;
 }
@@ -43,6 +62,9 @@ void core_free_animal_content(animal_t *animal) {
 // Let's rewrite the full file to be safe and correct.
 
 esp_err_t core_save_animal(const animal_t *animal) {
+    if (!core_storage_ready()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     if (!animal || strlen(animal->id) == 0) return ESP_ERR_INVALID_ARG;
     ensure_dirs();
     cJSON *root = cJSON_CreateObject();
@@ -92,6 +114,9 @@ esp_err_t core_save_animal(const animal_t *animal) {
 }
 
 esp_err_t core_get_animal(const char *id, animal_t *out_animal) {
+    if (!core_storage_ready()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     char filepath[FILEPATH_BUF_LEN];
     int n = snprintf(filepath, sizeof(filepath), "%s/%s.json", ANIMAL_DIR, id);
     if (n < 0 || n >= (int)sizeof(filepath)) {
@@ -169,6 +194,9 @@ esp_err_t core_list_animals(animal_summary_t **out_list, size_t *out_count) {
 }
 
 esp_err_t core_search_animals(const char *query, animal_summary_t **out_list, size_t *out_count) {
+    if (!core_storage_ready()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     *out_list = NULL; *out_count = 0;
     DIR *dir = opendir(ANIMAL_DIR);
     if (!dir) return ESP_FAIL;
@@ -252,6 +280,9 @@ esp_err_t core_search_animals(const char *query, animal_summary_t **out_list, si
 void core_free_animal_list(animal_summary_t *list) { if (list) free(list); }
 
 esp_err_t core_add_weight(const char *animal_id, float weight, const char *unit) {
+    if (!core_storage_ready()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     animal_t animal;
     if (core_get_animal(animal_id, &animal) != ESP_OK) return ESP_FAIL;
     size_t new_count = animal.weight_count + 1;
@@ -268,6 +299,9 @@ esp_err_t core_add_weight(const char *animal_id, float weight, const char *unit)
 }
 
 esp_err_t core_add_event(const char *animal_id, event_type_t type, const char *description) {
+    if (!core_storage_ready()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     animal_t animal;
     if (core_get_animal(animal_id, &animal) != ESP_OK) return ESP_FAIL;
     size_t new_count = animal.event_count + 1;
@@ -284,6 +318,9 @@ esp_err_t core_add_event(const char *animal_id, event_type_t type, const char *d
 }
 
 esp_err_t core_get_alerts(char ***out_list, size_t *out_count) {
+    if (!core_storage_ready()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     *out_list = NULL; *out_count = 0;
     DIR *dir = opendir(ANIMAL_DIR);
     if (!dir) return ESP_FAIL;
@@ -390,6 +427,9 @@ void core_free_alert_list(char **list, size_t count) {
 esp_err_t core_save_document(const document_t *doc) { return ESP_OK; }
 
 esp_err_t core_generate_report(const char *animal_id) {
+    if (!core_storage_ready()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     animal_t animal;
     if (core_get_animal(animal_id, &animal) != ESP_OK) return ESP_FAIL;
     ensure_dirs();
@@ -416,6 +456,9 @@ esp_err_t core_generate_report(const char *animal_id) {
 }
 
 esp_err_t core_list_reports(char ***out_list, size_t *out_count) {
+    if (!core_storage_ready()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     *out_list = NULL; *out_count = 0;
     DIR *dir = opendir(REPORT_DIR);
     if (!dir) return ESP_FAIL;
@@ -435,6 +478,9 @@ esp_err_t core_list_reports(char ***out_list, size_t *out_count) {
 void core_free_report_list(char **list, size_t count) { if(list){ for(size_t i=0; i<count; i++) free(list[i]); free(list); } }
 
 esp_err_t core_log_event(log_level_t level, const char *module, const char *message) {
+    if (!core_storage_ready()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     log_entry_t entry; entry.timestamp = time(NULL); entry.level = level;
     strncpy(entry.module, module, 15); strncpy(entry.message, message, 127);
     char log_line[256]; snprintf(log_line, sizeof(log_line), "%lu|%d|%s|%s\n", (unsigned long)entry.timestamp, entry.level, entry.module, entry.message);
@@ -444,6 +490,9 @@ esp_err_t core_log_event(log_level_t level, const char *module, const char *mess
 }
 
 esp_err_t core_get_logs(char ***out_list, size_t *out_count, size_t max_lines) {
+    if (!core_storage_ready()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     *out_list = NULL; *out_count = 0;
     FILE *f = fopen(LOG_FILE, "r"); if (!f) return ESP_OK;
     size_t lines = 0; char buffer[256]; while (fgets(buffer, sizeof(buffer), f)) lines++;

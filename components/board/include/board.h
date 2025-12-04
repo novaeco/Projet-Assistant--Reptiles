@@ -12,7 +12,7 @@ extern "C" {
 #endif
 
 /**
- * @brief Initialize the board hardware (I2C, LCD, Touch, SD)
+ * @brief Initialize the board hardware (I2C, LCD, Touch; SD permanently disabled)
  *
  * @return esp_err_t ESP_OK on success
  */
@@ -58,7 +58,7 @@ bool board_has_sd(void);
 bool board_lcd_is_ready(void);
 
 /**
- * @brief Mount the SD card to /sdcard
+ * @brief Mount the SD card to /sdcard (currently returns ESP_ERR_NOT_SUPPORTED)
  *
  * @return esp_err_t ESP_OK on success
  */
