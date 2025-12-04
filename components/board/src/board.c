@@ -41,6 +41,7 @@ static io_extension_ws_handle_t s_io_ws = NULL;
 static ch422g_handle_t s_ch422 = NULL;
 static bool s_board_has_expander = false;
 static bool s_board_has_lcd = false;
+static bool s_logged_expander_absent = false;
 static uint8_t s_batt_raw_empty = CONFIG_BOARD_BATTERY_RAW_EMPTY;
 static uint8_t s_batt_raw_full = CONFIG_BOARD_BATTERY_RAW_FULL;
 static bool s_logged_batt_unavailable = false;
