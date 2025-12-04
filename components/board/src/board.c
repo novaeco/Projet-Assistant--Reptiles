@@ -48,7 +48,7 @@ static io_extension_ws_handle_t s_io_ws = NULL;
 static ch422g_handle_t s_ch422 = NULL;
 static bool s_board_has_expander = false;
 static bool s_board_has_lcd = false;
-static sdspi_dev_handle_t s_sdspi_handle = 0;
+static sdspi_dev_handle_t s_sdspi_handle = (sdspi_dev_handle_t)-1;
 static uint8_t s_batt_raw_empty = CONFIG_BOARD_BATTERY_RAW_EMPTY;
 static uint8_t s_batt_raw_full = CONFIG_BOARD_BATTERY_RAW_FULL;
 static bool s_logged_expander_absent = false;
@@ -833,11 +833,13 @@ esp_err_t board_mount_sdcard(void)
             continue;
         }
 
-        ESP_LOGI(TAG_SD, "SDSPI device handle=%p host.slot=%d (attempt=%d)",
-                 (void *)s_sdspi_handle, host.slot, (int)(attempt + 1));
+        ESP_LOGI(TAG_SD, "SDSPI device handle=%d host.slot=%d (attempt=%d)",
+                 (int)s_sdspi_handle, host.slot, (int)(attempt + 1));
 
-        ESP_LOGI(TAG_SD, "SDSPI host prepared (spi_host=%d, device=%p, host.slot=%d, target_freq=%dkHz)",
-                 BOARD_SD_SPI_HOST, (void *)s_sdspi_handle, host.slot, host.max_freq_khz);
+        ESP_LOGI(TAG_SD, "SDSPI host prepared (spi_host=%d, device=%d, host.slot=%d, target_freq=%dkHz)",
+                 BOARD_SD_SPI_HOST, (int)s_sdspi_handle, host.slot, host.max_freq_khz);
+
+        ESP_LOGD(TAG_SD, "About to mount: host.slot=%d (0x%08x)", host.slot, (unsigned)host.slot);
 
         ESP_LOGI(TAG_SD, "SD attempt %d/%d @ %dkHz (MISO=%d MOSI=%d SCLK=%d CS=EXIO%u)",
                  (int)(attempt + 1), (int)max_attempts, freq_table_khz[attempt],
@@ -898,7 +900,7 @@ esp_err_t board_mount_sdcard(void)
 
         ESP_LOGW(TAG_SD, "SD mount failed (attempt %d): %s", attempt + 1, esp_err_to_name(ret));
         sdspi_ioext_host_deinit(s_sdspi_handle, BOARD_SD_SPI_HOST, false);
-        s_sdspi_handle = 0;
+        s_sdspi_handle = (sdspi_dev_handle_t)-1;
         io_expander_sd_cs(false, cs_ctx);
         board_delay_for_sd();
     }
@@ -910,7 +912,7 @@ esp_err_t board_mount_sdcard(void)
     }
     if (spi_bus_initialized) {
         sdspi_ioext_host_deinit(s_sdspi_handle, BOARD_SD_SPI_HOST, spi_bus_owned);
-        s_sdspi_handle = 0;
+        s_sdspi_handle = (sdspi_dev_handle_t)-1;
         io_expander_sd_cs(false, cs_ctx);
     }
     ESP_LOGW(TAG_SD, "SD disabled, continuing without /sdcard (insert card and retry later)");
