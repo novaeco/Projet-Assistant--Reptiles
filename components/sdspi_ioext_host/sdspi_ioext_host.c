@@ -12,6 +12,7 @@
 #include <string.h>
 
 static const char *TAG = "sdspi_ioext";
+static const sdspi_dev_handle_t SDSPI_IOEXT_INVALID_DEVICE = (sdspi_dev_handle_t)-1;
 
 typedef struct {
   uint32_t cs_setup_delay_us;
@@ -29,6 +30,7 @@ typedef struct {
   sdspi_ioext_host_config_t cfg;
   bool sent_initial_clocks;
   spi_host_device_t host_id;
+  int ctx_index;
   int handle;
   bool bus_initialized;
   bool in_use;
@@ -70,26 +72,9 @@ static void sdspi_ioext_unlock_ctx_array(void) {
   }
 }
 
-static sdspi_ioext_context_t *sdspi_ioext_get_ctx_by_handle(int handle) {
-  if (handle <= 0 || handle > SDSPI_IOEXT_MAX_CTX) {
-    return NULL;
-  }
-
-  sdspi_ioext_context_t *ctx = NULL;
-  if (sdspi_ioext_lock_ctx_array(portMAX_DELAY)) {
-    sdspi_ioext_context_t *candidate = &s_ctx_table[handle - 1];
-    if (candidate->in_use && candidate->handle == handle) {
-      ctx = candidate;
-    }
-    sdspi_ioext_unlock_ctx_array();
-  }
-
-  return ctx;
-}
-
 static sdspi_ioext_context_t *
 sdspi_ioext_get_ctx_by_device(sdspi_dev_handle_t device) {
-  if (device == 0) {
+  if ((int)device < 0) {
     return NULL;
   }
 
@@ -121,9 +106,9 @@ static sdspi_ioext_context_t *sdspi_ioext_alloc_ctx(int *out_handle) {
       if (!candidate->in_use) {
         memset(candidate, 0, sizeof(*candidate));
         candidate->in_use = true;
-        candidate->handle = (int)(i + 1);
+        candidate->ctx_index = (int)(i + 1);
         ctx = candidate;
-        *out_handle = candidate->handle;
+        *out_handle = candidate->ctx_index;
         break;
       }
     }
@@ -193,18 +178,17 @@ static esp_err_t sdspi_ioext_send_initial_clocks(sdspi_ioext_context_t *ctx) {
 static esp_err_t sdspi_ioext_do_transaction(int slot, sdmmc_command_t *cmd) {
   static bool s_first_transaction_logged = false;
 
-  const int ctx_handle = slot;
+  ESP_LOGD(TAG, "do_transaction entry slot=%d (0x%08x)", slot, slot);
 
-  sdspi_ioext_context_t *ctx = sdspi_ioext_get_ctx_by_handle(ctx_handle);
+  sdspi_ioext_context_t *ctx = sdspi_ioext_get_ctx_by_device(slot);
   if (!ctx) {
-    ESP_LOGE(TAG, "SDSPI context unavailable for transaction (slot=%d)",
-             ctx_handle);
+    ESP_LOGE(TAG, "SDSPI context unavailable for transaction (slot=%d)", slot);
     return ESP_ERR_INVALID_STATE;
   }
 
-  if (ctx->device == 0) {
-    ESP_LOGE(TAG, "SDSPI device handle missing for slot %d (host=%d)",
-             ctx_handle, ctx->host_id);
+  if ((int)ctx->device < 0) {
+    ESP_LOGE(TAG, "SDSPI device handle missing for slot %d (host=%d)", slot,
+             ctx->host_id);
     return ESP_ERR_INVALID_STATE;
   }
 
@@ -299,9 +283,9 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config,
       SDSPI_SLOT_NO_CS; // CS is driven externally through IO expander
   slot_config.gpio_int = SDSPI_SLOT_NO_INT;
 
-  sdspi_dev_handle_t device_handle = 0;
+  sdspi_dev_handle_t device_handle = SDSPI_IOEXT_INVALID_DEVICE;
   err = sdspi_host_init_device(&slot_config, &device_handle);
-  if (err != ESP_OK || device_handle == 0) {
+  if (err != ESP_OK || (int)device_handle < 0) {
     ESP_LOGE(TAG, "SDSPI device init failed: %s", esp_err_to_name(err));
     if (bus_initialized_here) {
       spi_bus_free(host_id);
@@ -314,7 +298,7 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config,
     host.max_freq_khz = config->max_freq_khz;
   }
 
-  host.slot = host_id;
+  host.slot = (int)device_handle;
   host.do_transaction = sdspi_ioext_do_transaction;
 
   spi_device_interface_config_t clock_if_cfg = {
@@ -363,7 +347,7 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config,
   ctx->cfg.max_freq_khz = config->max_freq_khz;
   ctx->sent_initial_clocks = false;
   ctx->host_id = host_id;
-  ctx->handle = ctx_handle;
+  ctx->handle = (int)device_handle;
   ctx->bus_initialized = bus_initialized_here;
   ctx->lock = xSemaphoreCreateMutex();
   if (!ctx->lock) {
@@ -373,7 +357,7 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config,
         host_id);
   }
 
-  host.slot = ctx_handle;
+  host.slot = (int)device_handle;
   *host_out = host;
   *device_out = device_handle;
   ESP_LOGI(TAG,
@@ -391,7 +375,6 @@ esp_err_t sdspi_ioext_host_deinit(sdspi_dev_handle_t device,
   bool bus_owned = false;
   spi_device_handle_t clock_dev = NULL;
   sdspi_dev_handle_t device_handle = device;
-  int handle = (int)spi_host;
   bool took_ctx_lock = false;
   spi_host_device_t host_id = -1;
 
@@ -399,20 +382,21 @@ esp_err_t sdspi_ioext_host_deinit(sdspi_dev_handle_t device,
 
   if (sdspi_ioext_lock_ctx_array(portMAX_DELAY)) {
     sdspi_ioext_context_t *ctx = NULL;
-    if (handle > 0 && handle <= SDSPI_IOEXT_MAX_CTX) {
-      sdspi_ioext_context_t *candidate = &s_ctx_table[handle - 1];
-      if (candidate->in_use && candidate->handle == handle) {
-        ctx = candidate;
-      }
-    }
 
-    if (!ctx && device_handle != 0) {
+    if ((int)device_handle >= 0) {
       for (size_t i = 0; i < SDSPI_IOEXT_MAX_CTX; ++i) {
         sdspi_ioext_context_t *candidate = &s_ctx_table[i];
         if (candidate->in_use && candidate->device == device_handle) {
           ctx = candidate;
           break;
         }
+      }
+    }
+
+    if (!ctx && spi_host >= 0 && spi_host < SDSPI_IOEXT_MAX_CTX) {
+      sdspi_ioext_context_t *candidate = &s_ctx_table[spi_host];
+      if (candidate->in_use && candidate->host_id == spi_host) {
+        ctx = candidate;
       }
     }
 
@@ -432,7 +416,7 @@ esp_err_t sdspi_ioext_host_deinit(sdspi_dev_handle_t device,
   bus_owned = ctx_snapshot.bus_initialized;
   clock_dev = ctx_snapshot.clock_dev;
   host_id = ctx_snapshot.host_id;
-  if (device_handle == 0) {
+  if ((int)device_handle < 0) {
     device_handle = ctx_snapshot.device;
   }
 
@@ -445,7 +429,7 @@ esp_err_t sdspi_ioext_host_deinit(sdspi_dev_handle_t device,
     vSemaphoreDelete(ctx_snapshot.lock);
   }
 
-  if (device_handle != 0) {
+  if ((int)device_handle >= 0) {
     sdspi_host_remove_device(device_handle);
   }
   if (free_bus && bus_owned && host_id >= 0) {
