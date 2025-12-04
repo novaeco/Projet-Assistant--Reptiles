@@ -16,6 +16,7 @@ static bool is_connected = false;
 static bool has_credentials = false;
 static esp_timer_handle_t s_wifi_retry_timer = NULL;
 static uint32_t s_wifi_backoff_ms = 1000; // start at 1s
+static const uint32_t WIFI_RETRY_BACKOFF_MAX_MS = 30000;
 static const char *DEFAULT_WIFI_SSID = "MY_SSID";
 static const char *DEFAULT_WIFI_PASSWORD = "MY_PASS";
 
@@ -66,11 +67,6 @@ static esp_err_t apply_sta_config_with_recovery(const wifi_config_t *wifi_config
 
     ESP_LOGI(TAG, "STA config applied successfully");
 
-    esp_err_t connect_err = esp_wifi_connect();
-    if (connect_err != ESP_OK) {
-        ESP_LOGW(TAG, "esp_wifi_connect failed (non-blocking): %s", esp_err_to_name(connect_err));
-    }
-
     return ESP_OK;
 }
 
@@ -78,7 +74,45 @@ static void wifi_retry_cb(void *arg)
 {
     (void)arg;
     ESP_LOGI(TAG, "Wi-Fi reconnect attempt (backoff %ums)", s_wifi_backoff_ms);
-    esp_wifi_connect();
+    esp_err_t err = esp_wifi_connect();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "esp_wifi_connect failed during retry: %s", esp_err_to_name(err));
+    }
+}
+
+static esp_err_t ensure_wifi_retry_timer(void)
+{
+    if (s_wifi_retry_timer) {
+        return ESP_OK;
+    }
+
+    const esp_timer_create_args_t tmr_args = {
+        .callback = wifi_retry_cb,
+        .name = "wifi_retry"
+    };
+    esp_err_t err = esp_timer_create(&tmr_args, &s_wifi_retry_timer);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create Wi-Fi retry timer: %s", esp_err_to_name(err));
+    }
+    return err;
+}
+
+static void stop_wifi_retry_timer_best_effort(void)
+{
+    if (!s_wifi_retry_timer) {
+        return;
+    }
+
+    esp_err_t err = esp_timer_stop(s_wifi_retry_timer);
+    if (err == ESP_ERR_INVALID_STATE) {
+        // Timer was not running; treat as expected.
+        ESP_LOGD(TAG, "Wi-Fi retry timer was not running");
+        return;
+    }
+
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to stop Wi-Fi retry timer: %s", esp_err_to_name(err));
+    }
 }
 
 static void schedule_wifi_retry(uint32_t delay_ms)
@@ -88,16 +122,16 @@ static void schedule_wifi_retry(uint32_t delay_ms)
         return;
     }
 
-    if (!s_wifi_retry_timer) {
-        const esp_timer_create_args_t tmr_args = {
-            .callback = wifi_retry_cb,
-            .name = "wifi_retry"
-        };
-        ESP_ERROR_CHECK(esp_timer_create(&tmr_args, &s_wifi_retry_timer));
+    if (ensure_wifi_retry_timer() != ESP_OK) {
+        return;
     }
 
-    ESP_ERROR_CHECK(esp_timer_stop(s_wifi_retry_timer));
-    ESP_ERROR_CHECK(esp_timer_start_once(s_wifi_retry_timer, delay_ms * 1000ULL));
+    stop_wifi_retry_timer_best_effort();
+
+    esp_err_t err = esp_timer_start_once(s_wifi_retry_timer, delay_ms * 1000ULL);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to schedule Wi-Fi retry: %s", esp_err_to_name(err));
+    }
 }
 
 static void event_handler(void* arg, esp_event_base_t event_base,
@@ -105,14 +139,21 @@ static void event_handler(void* arg, esp_event_base_t event_base,
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         ESP_LOGI(TAG, "Wi-Fi STA start");
-        schedule_wifi_retry(10); // tiny delay to allow config to settle
+        esp_err_t err = esp_wifi_connect();
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "esp_wifi_connect failed on STA start: %s", esp_err_to_name(err));
+            schedule_wifi_retry(s_wifi_backoff_ms);
+        }
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         is_connected = false;
         net_server_stop(); // Stop server on disconnect
         wifi_event_sta_disconnected_t *disc = (wifi_event_sta_disconnected_t *)event_data;
         ESP_LOGW(TAG, "Wi-Fi disconnected (reason=%d).", disc ? disc->reason : -1);
-        // Exponential backoff capped at 60s
-        s_wifi_backoff_ms = s_wifi_backoff_ms < 60000 ? s_wifi_backoff_ms * 2 : 60000;
+        // Exponential backoff capped at 30s
+        if (s_wifi_backoff_ms < WIFI_RETRY_BACKOFF_MAX_MS) {
+            uint32_t next_backoff = s_wifi_backoff_ms * 2;
+            s_wifi_backoff_ms = next_backoff > WIFI_RETRY_BACKOFF_MAX_MS ? WIFI_RETRY_BACKOFF_MAX_MS : next_backoff;
+        }
         schedule_wifi_retry(s_wifi_backoff_ms);
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
@@ -120,6 +161,7 @@ static void event_handler(void* arg, esp_event_base_t event_base,
                  IP2STR(&event->ip_info.ip), IP2STR(&event->ip_info.netmask), IP2STR(&event->ip_info.gw));
         is_connected = true;
         s_wifi_backoff_ms = 1000; // reset backoff after success
+        stop_wifi_retry_timer_best_effort();
         wifi_ap_record_t ap_info = {0};
         if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
             ESP_LOGI(TAG, "Connected SSID=%s RSSI=%d dBm", (char *)ap_info.ssid, ap_info.rssi);
