@@ -5,20 +5,24 @@
 #include "esp_log.h"
 #include "esp_err.h"
 #include "nvs_flash.h"
+#include "nvs.h"
 #include "esp_netif.h"
 #include "esp_sntp.h"
 #include "esp_http_client.h"
 #include "esp_timer.h"
+#include "sdkconfig.h"
 #include <string.h>
 
 static const char *TAG = "NET";
+static const char *NVS_NAMESPACE = "net";
+static const char *NVS_KEY_WIFI_SSID = "wifi_ssid";
+static const char *NVS_KEY_WIFI_PASS = "wifi_pass";
+
 static bool is_connected = false;
 static bool has_credentials = false;
 static esp_timer_handle_t s_wifi_retry_timer = NULL;
 static uint32_t s_wifi_backoff_ms = 1000; // start at 1s
 static const uint32_t WIFI_RETRY_BACKOFF_MAX_MS = 30000;
-static const char *DEFAULT_WIFI_SSID = "MY_SSID";
-static const char *DEFAULT_WIFI_PASSWORD = "MY_PASS";
 
 static esp_err_t apply_sta_config_with_recovery(const wifi_config_t *wifi_config_in)
 {
@@ -139,6 +143,10 @@ static void event_handler(void* arg, esp_event_base_t event_base,
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         ESP_LOGI(TAG, "Wi-Fi STA start");
+        if (!has_credentials) {
+            ESP_LOGW(TAG, "WiFi not provisioned, STA connect skipped");
+            return;
+        }
         esp_err_t err = esp_wifi_connect();
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "esp_wifi_connect failed on STA start: %s", esp_err_to_name(err));
@@ -170,6 +178,118 @@ static void event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
+static esp_err_t net_load_credentials_from_nvs(char *ssid, size_t ssid_len, char *pass, size_t pass_len)
+{
+    nvs_handle_t nvs = 0;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    size_t ssid_required = 0;
+    size_t pass_required = 0;
+    err = nvs_get_str(nvs, NVS_KEY_WIFI_SSID, NULL, &ssid_required);
+    if (err == ESP_OK && ssid_required > ssid_len) {
+        err = ESP_ERR_NVS_INVALID_LENGTH;
+    }
+    if (err == ESP_OK) {
+        err = nvs_get_str(nvs, NVS_KEY_WIFI_SSID, ssid, &ssid_required);
+    }
+    if (err == ESP_OK) {
+        err = nvs_get_str(nvs, NVS_KEY_WIFI_PASS, NULL, &pass_required);
+        if (err == ESP_OK && pass_required > pass_len) {
+            err = ESP_ERR_NVS_INVALID_LENGTH;
+        }
+    }
+    if (err == ESP_OK) {
+        err = nvs_get_str(nvs, NVS_KEY_WIFI_PASS, pass, &pass_required);
+    }
+
+    nvs_close(nvs);
+    if (err != ESP_OK) {
+        if (ssid_len > 0) {
+            ssid[0] = '\0';
+        }
+        if (pass_len > 0) {
+            pass[0] = '\0';
+        }
+    }
+    return err;
+}
+
+static bool net_has_nonempty_credentials(const wifi_config_t *cfg)
+{
+    return cfg && cfg->sta.ssid[0] != '\0';
+}
+
+esp_err_t net_manager_set_credentials(const char *ssid, const char *password, bool persist)
+{
+    if (!ssid || !password) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    size_t ssid_len = strlen(ssid);
+    size_t pass_len = strlen(password);
+    if (ssid_len >= sizeof(((wifi_config_t *)0)->sta.ssid) ||
+        pass_len >= sizeof(((wifi_config_t *)0)->sta.password)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (persist) {
+        nvs_handle_t nvs = 0;
+        esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
+        if (err != ESP_OK) {
+            return err;
+        }
+        err = nvs_set_str(nvs, NVS_KEY_WIFI_SSID, ssid);
+        if (err == ESP_OK) {
+            err = nvs_set_str(nvs, NVS_KEY_WIFI_PASS, password);
+        }
+        if (err == ESP_OK) {
+            err = nvs_commit(nvs);
+        }
+        nvs_close(nvs);
+        if (err != ESP_OK) {
+            return err;
+        }
+    }
+
+    wifi_config_t wifi_cfg = {0};
+    strncpy((char *)wifi_cfg.sta.ssid, ssid, sizeof(wifi_cfg.sta.ssid));
+    strncpy((char *)wifi_cfg.sta.password, password, sizeof(wifi_cfg.sta.password));
+
+    esp_err_t err = apply_sta_config_with_recovery(&wifi_cfg);
+    if (err == ESP_OK) {
+        has_credentials = true;
+        s_wifi_backoff_ms = 1000;
+        schedule_wifi_retry(10);
+    }
+    return err;
+}
+
+static bool net_try_load_credentials(wifi_config_t *wifi_cfg)
+{
+    char ssid[sizeof(wifi_cfg->sta.ssid)] = {0};
+    char pass[sizeof(wifi_cfg->sta.password)] = {0};
+
+    esp_err_t err = net_load_credentials_from_nvs(ssid, sizeof(ssid), pass, sizeof(pass));
+    if (err == ESP_OK && ssid[0] != '\0') {
+        ESP_LOGI(TAG, "Using WiFi credentials from NVS (namespace '%s')", NVS_NAMESPACE);
+        strncpy((char *)wifi_cfg->sta.ssid, ssid, sizeof(wifi_cfg->sta.ssid));
+        strncpy((char *)wifi_cfg->sta.password, pass, sizeof(wifi_cfg->sta.password));
+        return true;
+    }
+
+    if (strlen(CONFIG_NET_WIFI_SSID) > 0) {
+        ESP_LOGI(TAG, "Using WiFi credentials from Kconfig (CONFIG_NET_WIFI_SSID)");
+        strncpy((char *)wifi_cfg->sta.ssid, CONFIG_NET_WIFI_SSID, sizeof(wifi_cfg->sta.ssid));
+        strncpy((char *)wifi_cfg->sta.password, CONFIG_NET_WIFI_PASS, sizeof(wifi_cfg->sta.password));
+        return true;
+    }
+
+    return false;
+}
+
 esp_err_t net_init(void)
 {
     ESP_LOGI(TAG, "Initializing Network...");
@@ -183,15 +303,15 @@ esp_err_t net_init(void)
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
 
-    // Apply debug credentials so the station connects immediately when no NVS entries are present
     wifi_config_t wifi_config = {0};
-    strncpy((char *)wifi_config.sta.ssid, DEFAULT_WIFI_SSID, sizeof(wifi_config.sta.ssid));
-    strncpy((char *)wifi_config.sta.password, DEFAULT_WIFI_PASSWORD, sizeof(wifi_config.sta.password));
-    ESP_LOGI(TAG, "Applying debug Wi-Fi credentials (SSID='%s')", DEFAULT_WIFI_SSID);
-    if (apply_sta_config_with_recovery(&wifi_config) == ESP_OK) {
-        has_credentials = (strlen(DEFAULT_WIFI_SSID) > 0);
+    has_credentials = net_try_load_credentials(&wifi_config) && net_has_nonempty_credentials(&wifi_config);
+    if (has_credentials) {
+        ESP_LOGI(TAG, "Applying provisioned Wi-Fi credentials (SSID='%s')", (char *)wifi_config.sta.ssid);
+        if (apply_sta_config_with_recovery(&wifi_config) != ESP_OK) {
+            has_credentials = false;
+        }
     } else {
-        has_credentials = false;
+        ESP_LOGW(TAG, "WiFi not provisioned, STA connect skipped");
     }
 
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
@@ -219,18 +339,8 @@ esp_err_t net_init(void)
 
 esp_err_t net_connect(const char *ssid, const char *password)
 {
-    wifi_config_t wifi_config = {0};
-    strncpy((char*)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid));
-    strncpy((char*)wifi_config.sta.password, password, sizeof(wifi_config.sta.password));
-
     ESP_LOGI(TAG, "Connecting to %s...", ssid);
-    if (apply_sta_config_with_recovery(&wifi_config) == ESP_OK) {
-        has_credentials = true;
-        s_wifi_backoff_ms = 1000;
-        schedule_wifi_retry(10);
-    }
-
-    return ESP_OK;
+    return net_manager_set_credentials(ssid, password, false);
 }
 
 bool net_is_connected(void)

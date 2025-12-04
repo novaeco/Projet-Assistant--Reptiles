@@ -77,17 +77,6 @@ void app_main(void)
     ESP_LOGI(TAG, "Starting MQTT client...");
     ESP_ERROR_CHECK(iot_init());
 
-    // Optional: Check for saved WiFi credentials and connect
-    char ssid[32] = {0};
-    char pwd[64] = {0};
-    if (storage_nvs_get_str("wifi_ssid", ssid, sizeof(ssid)) == ESP_OK && strlen(ssid) > 0) {
-        storage_nvs_get_str("wifi_pwd", pwd, sizeof(pwd));
-        ESP_LOGI(TAG, "Found saved WiFi credentials, connecting to %s...", ssid);
-        net_connect(ssid, pwd);
-    } else {
-        ESP_LOGI(TAG, "No saved WiFi credentials found.");
-    }
-
     ESP_LOGI(TAG, "System Initialized Successfully.");
 
     // Keep app_main alive to avoid returning to RTOS idle

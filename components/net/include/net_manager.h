@@ -42,6 +42,16 @@ bool net_is_connected(void);
  */
 esp_err_t net_http_get(const char *url, char *out_buffer, size_t buffer_len);
 
+/**
+ * @brief Provision Wi-Fi credentials.
+ *
+ * @param ssid SSID string (null-terminated).
+ * @param password Password string (null-terminated).
+ * @param persist If true, store credentials in NVS (namespace "net", keys "wifi_ssid"/"wifi_pass").
+ * @return esp_err_t ESP_OK on success; validation or storage errors otherwise.
+ */
+esp_err_t net_manager_set_credentials(const char *ssid, const char *password, bool persist);
+
 #ifdef __cplusplus
 }
 #endif
