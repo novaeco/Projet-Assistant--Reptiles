@@ -833,11 +833,11 @@ esp_err_t board_mount_sdcard(void)
             continue;
         }
 
-        ESP_LOGI(TAG_SD, "SDSPI device handle=0x%08" PRIxPTR " host.slot=%d (attempt=%d)",
-                 (uintptr_t)s_sdspi_handle, host.slot, (int)(attempt + 1));
+        ESP_LOGI(TAG_SD, "SDSPI device handle=%p host.slot=%d (attempt=%d)",
+                 (void *)s_sdspi_handle, host.slot, (int)(attempt + 1));
 
-        ESP_LOGI(TAG_SD, "SDSPI host prepared (spi_host=%d, device=0x%08" PRIxPTR ", host.slot=%d, target_freq=%dkHz)",
-                 BOARD_SD_SPI_HOST, (uintptr_t)s_sdspi_handle, host.slot, host.max_freq_khz);
+        ESP_LOGI(TAG_SD, "SDSPI host prepared (spi_host=%d, device=%p, host.slot=%d, target_freq=%dkHz)",
+                 BOARD_SD_SPI_HOST, (void *)s_sdspi_handle, host.slot, host.max_freq_khz);
 
         ESP_LOGI(TAG_SD, "SD attempt %d/%d @ %dkHz (MISO=%d MOSI=%d SCLK=%d CS=EXIO%u)",
                  (int)(attempt + 1), (int)max_attempts, freq_table_khz[attempt],
