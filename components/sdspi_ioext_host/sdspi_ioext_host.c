@@ -15,6 +15,12 @@
 static const char *TAG = "sdspi_ioext";
 static const sdspi_dev_handle_t SDSPI_IOEXT_INVALID_DEVICE = (sdspi_dev_handle_t)-1;
 
+// Keep the SDSPI IO-extender context bound to the canonical ESP-IDF SPI host
+// count instead of a hard-coded value. SPI_HOST_MAX is provided by
+// driver/spi_common.h and reflects the number of available SPI peripherals for
+// the target in ESP-IDF v6.1.
+#define SDSPI_IOEXT_MAX_CTX (SPI_HOST_MAX)
+
 typedef struct {
   uint32_t cs_setup_delay_us;
   uint32_t cs_hold_delay_us;
@@ -299,7 +305,7 @@ esp_err_t sdspi_ioext_host_init(const sdspi_ioext_config_t *config,
   bool bus_initialized_here = false;
   sdspi_ioext_context_t *ctx = NULL;
 
-  ESP_RETURN_ON_FALSE(host_id >= 0 && host_id < SDSPI_IOEXT_MAX_CTX,
+  ESP_RETURN_ON_FALSE(host_id >= SPI1_HOST && host_id < SDSPI_IOEXT_MAX_CTX,
                       ESP_ERR_INVALID_ARG, TAG, "invalid SPI host id");
 
   if (config->bus_cfg) {
