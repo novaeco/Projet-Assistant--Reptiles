@@ -16,6 +16,7 @@
 #include "esp_lcd_touch.h"
 #include "reptile_storage.h"
 #include "esp_heap_caps.h"
+#include "esp_attr.h"
 
 static const char *TAG = "UI";
 
@@ -32,15 +33,19 @@ static uint32_t s_flush_count = 0;
 static portMUX_TYPE s_rgb_sync_spinlock = portMUX_INITIALIZER_UNLOCKED;
 typedef struct {
     lv_display_t *disp;
-    uint32_t flush_count;
-    uint32_t vsync_count;
-    uint32_t pending_flush;
-    uint32_t last_flush_vsync;
-    uint32_t last_swap_vsync;
-    uint32_t missed_swap_warning;
+    SemaphoreHandle_t vsync_sem;
+    volatile uint32_t flush_count;
+    volatile uint32_t vsync_count;
+    volatile uint32_t pending_flush;
+    volatile uint32_t last_flush_vsync;
+    volatile uint32_t last_swap_vsync;
+    volatile uint32_t missed_swap_warning;
+    volatile bool vsync_registered;
 } ui_rgb_sync_t;
 
 static ui_rgb_sync_t s_rgb_sync = {0};
+static StaticSemaphore_t s_vsync_sem_buffer;
+static SemaphoreHandle_t s_vsync_sem = NULL;
 
 static void ui_create_smoke_label(void);
 static void ui_initial_invalidate_cb(lv_timer_t *timer);
@@ -53,34 +58,32 @@ static void ui_apply_high_contrast_screen(void);
 // Flush Callback (Display)
 // =============================================================================
 
-static bool ui_on_vsync(esp_lcd_panel_handle_t panel, const esp_lcd_rgb_panel_event_data_t *edata, void *user_ctx)
+static bool IRAM_ATTR ui_on_vsync(esp_lcd_panel_handle_t panel, const esp_lcd_rgb_panel_event_data_t *edata, void *user_ctx)
 {
     (void)panel;
     (void)edata;
     ui_rgb_sync_t *sync = (ui_rgb_sync_t *)user_ctx;
-    if (!sync || !sync->disp) {
+    if (!sync) {
         return false;
     }
 
-    bool signal_flush_ready = false;
     uint32_t vsync = 0;
+    BaseType_t task_woken = pdFALSE;
 
     portENTER_CRITICAL_ISR(&s_rgb_sync_spinlock);
     vsync = ++sync->vsync_count;
     if (sync->pending_flush) {
-        sync->pending_flush = 0;
+        sync->pending_flush--;
         sync->last_swap_vsync = vsync;
-        signal_flush_ready = true;
+        if (sync->vsync_sem) {
+            (void)xSemaphoreGiveFromISR(sync->vsync_sem, &task_woken);
+        }
     } else if ((vsync - sync->last_swap_vsync) > 240U) {
         sync->missed_swap_warning = 1;
     }
     portEXIT_CRITICAL_ISR(&s_rgb_sync_spinlock);
 
-    if (signal_flush_ready) {
-        lv_display_flush_ready(sync->disp);
-    }
-
-    return false;
+    return task_woken == pdTRUE;
 }
 
 static void ui_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
@@ -95,10 +98,11 @@ static void ui_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_m
     uint32_t count = 0;
     uint32_t last_flush_vsync = 0;
     bool missed_swap_warning = false;
+    bool vsync_sync_enabled = false;
 
     portENTER_CRITICAL(&s_rgb_sync_spinlock);
     pending_before = s_rgb_sync.pending_flush;
-    s_rgb_sync.pending_flush = 1;
+    s_rgb_sync.pending_flush++;
     s_rgb_sync.last_flush_vsync = s_rgb_sync.vsync_count;
     current_vsync = s_rgb_sync.vsync_count;
     count = ++s_rgb_sync.flush_count;
@@ -108,6 +112,7 @@ static void ui_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_m
     if (missed_swap_warning) {
         s_rgb_sync.missed_swap_warning = 0;
     }
+    vsync_sync_enabled = s_rgb_sync.vsync_registered;
     portEXIT_CRITICAL(&s_rgb_sync_spinlock);
 
     esp_err_t draw_err = esp_lcd_panel_draw_bitmap(s_panel_handle, x1, y1, x2, y2, px_map);
@@ -132,6 +137,26 @@ static void ui_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_m
         ESP_LOGW(TAG, "No buffer swap observed for >240 vsync ticks (vsync=%u flushes=%u)",
                  (unsigned)current_vsync, (unsigned)count);
     }
+
+    if (vsync_sync_enabled && s_rgb_sync.vsync_sem) {
+        if (xSemaphoreTake(s_rgb_sync.vsync_sem, pdMS_TO_TICKS(50)) != pdTRUE) {
+            ESP_LOGW(TAG, "VSYNC wait timeout after flush #%u (vsync=%u)", (unsigned)count, (unsigned)current_vsync);
+            portENTER_CRITICAL(&s_rgb_sync_spinlock);
+            if (s_rgb_sync.pending_flush) {
+                s_rgb_sync.pending_flush--;
+            }
+            portEXIT_CRITICAL(&s_rgb_sync_spinlock);
+        }
+    } else {
+        portENTER_CRITICAL(&s_rgb_sync_spinlock);
+        if (s_rgb_sync.pending_flush) {
+            s_rgb_sync.pending_flush--;
+        }
+        s_rgb_sync.last_swap_vsync = s_rgb_sync.vsync_count;
+        portEXIT_CRITICAL(&s_rgb_sync_spinlock);
+    }
+
+    lv_display_flush_ready(disp);
 }
 
 // =============================================================================
@@ -227,11 +252,23 @@ esp_err_t ui_init(void)
     lv_display_set_user_data(s_disp, s_panel_handle);
     lv_display_set_flush_cb(s_disp, ui_flush_cb);
     s_rgb_sync.disp = s_disp;
+    s_rgb_sync.vsync_registered = false;
+
+    s_vsync_sem = xSemaphoreCreateBinaryStatic(&s_vsync_sem_buffer);
+    if (!s_vsync_sem) {
+        ESP_LOGE(TAG, "Failed to create VSYNC semaphore");
+    }
+    s_rgb_sync.vsync_sem = s_vsync_sem;
 
     esp_lcd_rgb_panel_event_callbacks_t panel_cbs = {
         .on_vsync = ui_on_vsync,
     };
-    ESP_ERROR_CHECK(esp_lcd_rgb_panel_register_event_callbacks(s_panel_handle, &panel_cbs, &s_rgb_sync));
+    esp_err_t cb_err = esp_lcd_rgb_panel_register_event_callbacks(s_panel_handle, &panel_cbs, &s_rgb_sync);
+    if (cb_err != ESP_OK) {
+        ESP_LOGW(TAG, "VSYNC callback registration failed (%s), continuing without ISR sync", esp_err_to_name(cb_err));
+    } else {
+        s_rgb_sync.vsync_registered = true;
+    }
 
     // 4. Set Buffers (Direct Mode with RGB Panel Buffers)
     void *buf1 = NULL;
