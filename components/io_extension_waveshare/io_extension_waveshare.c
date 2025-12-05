@@ -19,12 +19,29 @@
 
 struct io_extension_ws {
     i2c_master_dev_handle_t dev;
+    i2c_master_bus_handle_t bus;
     uint8_t last_io_value;
     SemaphoreHandle_t lock;
     uint8_t retries;
 };
 
 static const char *TAG = "io_ext_ws";
+
+static esp_err_t io_extension_ws_recover_bus(io_extension_ws_handle_t handle)
+{
+    if (!handle || !handle->bus) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    esp_err_t err = i2c_master_bus_reset(handle->bus);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "I2C bus reset failed: %s", esp_err_to_name(err));
+    } else {
+        ESP_LOGI(TAG, "I2C bus reset after invalid response");
+    }
+    vTaskDelay(pdMS_TO_TICKS(2));
+    return err;
+}
 
 static esp_err_t io_extension_ws_read_reg(io_extension_ws_handle_t handle, uint8_t reg, uint8_t *value)
 {
@@ -34,6 +51,7 @@ static esp_err_t io_extension_ws_read_reg(io_extension_ws_handle_t handle, uint8
 
     uint8_t attempts = handle->retries ? handle->retries : IO_EXTENSION_MAX_RETRIES;
     esp_err_t last_err = ESP_FAIL;
+    bool attempted_recover = false;
     for (uint8_t i = 0; i < attempts; ++i) {
         last_err = i2c_master_transmit_receive(handle->dev, &reg, 1, value, 1, pdMS_TO_TICKS(IO_EXTENSION_I2C_TIMEOUT_MS));
         if (last_err == ESP_OK) {
@@ -41,6 +59,10 @@ static esp_err_t io_extension_ws_read_reg(io_extension_ws_handle_t handle, uint8
         }
         ESP_LOGW(TAG, "read reg 0x%02X attempt %u/%u failed: %s", reg, (unsigned)(i + 1), (unsigned)attempts,
                  esp_err_to_name(last_err));
+        if (last_err == ESP_ERR_INVALID_RESPONSE && !attempted_recover) {
+            attempted_recover = true;
+            io_extension_ws_recover_bus(handle);
+        }
         vTaskDelay(pdMS_TO_TICKS(2));
     }
     return last_err;
@@ -51,6 +73,7 @@ static esp_err_t io_extension_ws_write(io_extension_ws_handle_t handle, uint8_t 
     uint8_t payload[2] = {reg, value};
     const uint8_t attempts = handle->retries ? handle->retries : IO_EXTENSION_MAX_RETRIES;
     esp_err_t last_err = ESP_FAIL;
+    bool attempted_recover = false;
 
     for (uint8_t i = 0; i < attempts; ++i) {
         last_err = i2c_master_transmit(handle->dev, payload, sizeof(payload), pdMS_TO_TICKS(IO_EXTENSION_I2C_TIMEOUT_MS));
@@ -59,6 +82,10 @@ static esp_err_t io_extension_ws_write(io_extension_ws_handle_t handle, uint8_t 
         }
         ESP_LOGW(TAG, "write reg 0x%02X attempt %u/%u failed: %s", reg, (unsigned)(i + 1), (unsigned)attempts,
                  esp_err_to_name(last_err));
+        if (last_err == ESP_ERR_INVALID_RESPONSE && !attempted_recover) {
+            attempted_recover = true;
+            io_extension_ws_recover_bus(handle);
+        }
         vTaskDelay(pdMS_TO_TICKS(2));
     }
 
@@ -90,6 +117,7 @@ static esp_err_t io_extension_ws_write(io_extension_ws_handle_t handle, uint8_t 
 
 esp_err_t io_extension_ws_init(const io_extension_ws_config_t *config, io_extension_ws_handle_t *handle_out)
 {
+    esp_err_t ret = ESP_OK;
     ESP_RETURN_ON_FALSE(config && handle_out, ESP_ERR_INVALID_ARG, TAG, "invalid args");
     ESP_RETURN_ON_FALSE(config->bus, ESP_ERR_INVALID_ARG, TAG, "missing bus handle");
 
@@ -102,23 +130,17 @@ esp_err_t io_extension_ws_init(const io_extension_ws_config_t *config, io_extens
     uint8_t addr = config->address ? config->address : IO_EXTENSION_ADDR_DEFAULT;
     uint32_t freq = config->scl_speed_hz ? config->scl_speed_hz : 50000;
     handle->retries = (config->retries == 0) ? IO_EXTENSION_MAX_RETRIES : config->retries;
+    handle->bus = config->bus;
 
     i2c_device_config_t dev_cfg = {
         .device_address = addr,
         .scl_speed_hz = freq,
     };
 
-    esp_err_t err = i2c_master_bus_add_device(config->bus, &dev_cfg, &handle->dev);
-    if (err != ESP_OK) {
-        goto err;
-    }
+    ESP_GOTO_ON_ERROR(i2c_master_bus_add_device(config->bus, &dev_cfg, &handle->dev), err, TAG, "add device failed");
 
     // Configure all pins as outputs initially
-    err = io_extension_ws_write(handle, IO_EXTENSION_MODE, 0xFF);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "mode write failed: %s", esp_err_to_name(err));
-        goto err;
-    }
+    ESP_GOTO_ON_ERROR(io_extension_ws_write(handle, IO_EXTENSION_MODE, 0xFF), err, TAG, "mode write failed");
 
     handle->last_io_value = 0xFF;
     *handle_out = handle;
@@ -136,7 +158,7 @@ err:
         }
         free(handle);
     }
-    return err;
+    return ret;
 }
 
 esp_err_t io_extension_ws_set_output(io_extension_ws_handle_t handle, uint8_t pin, bool level)

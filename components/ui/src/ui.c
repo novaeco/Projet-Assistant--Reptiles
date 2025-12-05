@@ -9,6 +9,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
+#include "freertos/portmacro.h"
 #include "lvgl.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_rgb.h"
@@ -27,15 +28,16 @@ static lv_display_t *s_disp = NULL;
 static lv_indev_t *s_indev = NULL;
 static esp_lcd_panel_handle_t s_panel_handle = NULL;
 static esp_lcd_touch_handle_t s_touch_handle = NULL;
-static volatile uint32_t s_flush_count = 0;
+static uint32_t s_flush_count = 0;
+static portMUX_TYPE s_rgb_sync_spinlock = portMUX_INITIALIZER_UNLOCKED;
 typedef struct {
     lv_display_t *disp;
-    volatile uint32_t flush_count;
-    volatile uint32_t vsync_count;
-    volatile uint32_t pending_flush;
-    volatile uint32_t last_flush_vsync;
-    volatile uint32_t last_swap_vsync;
-    volatile uint32_t missed_swap_warning;
+    uint32_t flush_count;
+    uint32_t vsync_count;
+    uint32_t pending_flush;
+    uint32_t last_flush_vsync;
+    uint32_t last_swap_vsync;
+    uint32_t missed_swap_warning;
 } ui_rgb_sync_t;
 
 static ui_rgb_sync_t s_rgb_sync = {0};
@@ -60,13 +62,22 @@ static bool ui_on_vsync(esp_lcd_panel_handle_t panel, const esp_lcd_rgb_panel_ev
         return false;
     }
 
-    uint32_t vsync = ++sync->vsync_count;
+    bool signal_flush_ready = false;
+    uint32_t vsync = 0;
+
+    portENTER_CRITICAL_ISR(&s_rgb_sync_spinlock);
+    vsync = ++sync->vsync_count;
     if (sync->pending_flush) {
         sync->pending_flush = 0;
         sync->last_swap_vsync = vsync;
-        lv_display_flush_ready(sync->disp);
+        signal_flush_ready = true;
     } else if ((vsync - sync->last_swap_vsync) > 240U) {
         sync->missed_swap_warning = 1;
+    }
+    portEXIT_CRITICAL_ISR(&s_rgb_sync_spinlock);
+
+    if (signal_flush_ready) {
+        lv_display_flush_ready(sync->disp);
     }
 
     return false;
@@ -79,20 +90,34 @@ static void ui_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_m
     const int x2 = area->x2 + 1;
     const int y2 = area->y2 + 1;
 
-    uint32_t pending_before = s_rgb_sync.pending_flush;
+    uint32_t pending_before = 0;
+    uint32_t current_vsync = 0;
+    uint32_t count = 0;
+    uint32_t last_flush_vsync = 0;
+    bool missed_swap_warning = false;
+
+    portENTER_CRITICAL(&s_rgb_sync_spinlock);
+    pending_before = s_rgb_sync.pending_flush;
     s_rgb_sync.pending_flush = 1;
     s_rgb_sync.last_flush_vsync = s_rgb_sync.vsync_count;
-    uint32_t count = ++s_rgb_sync.flush_count;
+    current_vsync = s_rgb_sync.vsync_count;
+    count = ++s_rgb_sync.flush_count;
     s_flush_count = count;
+    last_flush_vsync = s_rgb_sync.last_flush_vsync;
+    missed_swap_warning = s_rgb_sync.missed_swap_warning;
+    if (missed_swap_warning) {
+        s_rgb_sync.missed_swap_warning = 0;
+    }
+    portEXIT_CRITICAL(&s_rgb_sync_spinlock);
 
     esp_err_t draw_err = esp_lcd_panel_draw_bitmap(s_panel_handle, x1, y1, x2, y2, px_map);
     if (count <= 5 || (count % 60U) == 0U) {
         ESP_LOGI(TAG, "LVGL flush #%u area x%d-%d y%d-%d vsync=%u pending=%u%s", (unsigned)count, x1, x2 - 1, y1,
-                 y2 - 1, (unsigned)s_rgb_sync.vsync_count, (unsigned)s_rgb_sync.pending_flush,
+                 y2 - 1, (unsigned)current_vsync, (unsigned)s_rgb_sync.pending_flush,
                  (draw_err == ESP_OK) ? "" : " (draw err)");
     } else {
         ESP_LOGD(TAG, "flush_cb area x%d-%d y%d-%d (count=%u vsync=%u)%s", x1, x2 - 1, y1, y2 - 1,
-                  (unsigned)count, (unsigned)s_rgb_sync.vsync_count, (draw_err == ESP_OK) ? "" : " draw_err");
+                  (unsigned)count, (unsigned)current_vsync, (draw_err == ESP_OK) ? "" : " draw_err");
     }
 
     if (draw_err != ESP_OK) {
@@ -100,13 +125,12 @@ static void ui_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_m
     }
 
     if (pending_before) {
-        ESP_LOGW(TAG, "Flush overlap: previous buffer still pending at vsync=%u", (unsigned)s_rgb_sync.last_flush_vsync);
+        ESP_LOGW(TAG, "Flush overlap: previous buffer still pending at vsync=%u", (unsigned)last_flush_vsync);
     }
 
-    if (s_rgb_sync.missed_swap_warning) {
-        s_rgb_sync.missed_swap_warning = 0;
+    if (missed_swap_warning) {
         ESP_LOGW(TAG, "No buffer swap observed for >240 vsync ticks (vsync=%u flushes=%u)",
-                 (unsigned)s_rgb_sync.vsync_count, (unsigned)s_rgb_sync.flush_count);
+                 (unsigned)current_vsync, (unsigned)count);
     }
 }
 
