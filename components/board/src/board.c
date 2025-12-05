@@ -713,7 +713,7 @@ static esp_err_t board_lcd_selftest_pattern(void)
     } else {
         ESP_LOGE(TAG, "LCD selftest draw failed: %s", esp_err_to_name(err));
     }
-    vTaskDelay(pdMS_TO_TICKS(50));
+    vTaskDelay(pdMS_TO_TICKS(1000));
     return err;
 #else
     return ESP_OK;

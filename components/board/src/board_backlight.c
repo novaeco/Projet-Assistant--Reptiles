@@ -20,6 +20,8 @@
 static const char *TAG = "BOARD_BK";
 static bool s_lcd_vdd_supported = true;
 static bool s_lcd_vdd_warned_once = false;
+static bool s_lcd_vdd_latched = false;
+static bool s_disp_gate_on = false;
 
 #if defined(LEDC_HIGH_SPEED_MODE)
 #define BOARD_BACKLIGHT_LEDC_MODE       LEDC_HIGH_SPEED_MODE
@@ -51,17 +53,13 @@ static esp_err_t board_backlight_set_enables(bool enable_backlight)
         return ESP_OK;
     }
 
-    const bool enable_vdd = enable_backlight;
     esp_err_t err = ESP_FAIL;
+    esp_err_t vdd_err = ESP_OK;
 
-    if (s_lcd_vdd_supported) {
-        // I/O extension is an external I2C device (Waveshare CH32V003).
-        // At boot it can occasionally NACK/return invalid replies for the very first transactions.
-        // Retry a few times to avoid blocking UI bring-up on a transient condition.
-        esp_err_t vdd_err = ESP_FAIL;
-
+    if (s_lcd_vdd_supported && !s_lcd_vdd_latched) {
+        // Force LCD_VDD_EN high once after bring-up and never turn it off from brightness control.
         for (int attempt = 1; attempt <= 3; ++attempt) {
-            vdd_err = board_internal_set_output(IO_EXP_PIN_LCD_VDD, enable_vdd);
+            vdd_err = board_internal_set_output(IO_EXP_PIN_LCD_VDD, true);
             if (vdd_err == ESP_OK || vdd_err == ESP_ERR_INVALID_RESPONSE) {
                 break;
             }
@@ -82,12 +80,18 @@ static esp_err_t board_backlight_set_enables(bool enable_backlight)
         if (vdd_err != ESP_OK) {
             // Non-fatal: keep running; many panels are already powered. Prefer a usable UI.
             ESP_LOGW(TAG, "LCD_VDD_EN still failing: %s (continuing)", esp_err_to_name(vdd_err));
+        } else {
+            s_lcd_vdd_latched = true;
+            ESP_LOGI(TAG, "LCD_VDD_EN latched ON via IO expander");
         }
     }
 
     for (int attempt = 1; attempt <= 3; ++attempt) {
         err = board_internal_set_output(IO_EXP_PIN_BK, enable_backlight);
-        if (err == ESP_OK) return ESP_OK;
+        if (err == ESP_OK) {
+            s_disp_gate_on = enable_backlight;
+            return ESP_OK;
+        }
         ESP_LOGW(TAG, "DISP(BK_EN) set failed (%s) attempt %d/3", esp_err_to_name(err), attempt);
         vTaskDelay(pdMS_TO_TICKS(20 * attempt));
     }
@@ -141,7 +145,7 @@ esp_err_t board_backlight_set_percent(uint8_t percent)
     }
 
     const int ledc_limit = (1 << BOARD_BACKLIGHT_LEDC_DUTY_RES) - 1;
-    uint32_t duty = (uint32_t)(((double)percent / 100.0) * (double)max_duty);
+    uint32_t duty = (percent == 0) ? 0 : (uint32_t)(((double)percent / 100.0) * (double)max_duty);
 
     if (duty > max_duty) {
         duty = max_duty;
@@ -150,7 +154,7 @@ esp_err_t board_backlight_set_percent(uint8_t percent)
         duty = (uint32_t)ledc_limit;
     }
 
-    if (s_backlight_cfg.active_low) {
+    if (s_backlight_cfg.active_low && duty != 0) {
         duty = (uint32_t)max_duty - duty;
     }
 
@@ -162,14 +166,13 @@ esp_err_t board_backlight_set_percent(uint8_t percent)
         err = ledc_update_duty(BOARD_BACKLIGHT_LEDC_MODE, BOARD_BACKLIGHT_LEDC_CHANNEL);
     }
 
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "Backlight %u%% -> duty=%d/%u driver=%s enables:LCD_VDD=on BK=%s",
-                 percent,
-                 (int)duty,
-                 (unsigned)max_duty,
-                 board_backlight_driver_label(board_internal_get_io_driver()),
-                 enable ? "on" : "off");
-    }
+    ESP_LOGI(TAG, "Backlight %u%% -> duty=%d/%u driver=%s enables:LCD_VDD=%s BK=%s",
+             percent,
+             (int)duty,
+             (unsigned)max_duty,
+             board_backlight_driver_label(board_internal_get_io_driver()),
+             s_lcd_vdd_latched ? "on" : "unknown",
+             s_disp_gate_on ? "on" : "off");
 
     return err;
 }
