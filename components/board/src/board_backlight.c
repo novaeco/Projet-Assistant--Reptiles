@@ -8,6 +8,7 @@
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_err.h"
 
 #ifndef CONFIG_BOARD_BACKLIGHT_ACTIVE_LOW
 #define CONFIG_BOARD_BACKLIGHT_ACTIVE_LOW 0
@@ -47,17 +48,28 @@ static esp_err_t board_backlight_set_enables(bool enable_backlight)
     esp_err_t err = ESP_OK;
 
     if (board_internal_has_expander()) {
-        esp_err_t vdd_err = board_internal_set_output(IO_EXP_PIN_LCD_VDD, true);
-        if (vdd_err != ESP_OK) {
-            ESP_LOGW(TAG, "LCD_VDD enable failed: %s", esp_err_to_name(vdd_err));
-            err = (err == ESP_OK) ? vdd_err : err;
+        // I/O extension is an external I2C device (Waveshare CH32V003).
+        // At boot it can occasionally NACK/return invalid replies for the very first transactions.
+        // Retry a few times to avoid blocking UI bring-up on a transient condition.
+        for (int attempt = 1; attempt <= 3; ++attempt) {
+            err = board_internal_set_output(IO_EXP_PIN_LCD_VDD, true);
+            if (err == ESP_OK) break;
+            ESP_LOGW(TAG, "LCD_VDD_EN set failed (%s) attempt %d/3", esp_err_to_name(err), attempt);
+            vTaskDelay(pdMS_TO_TICKS(20 * attempt));
+        }
+        if (err != ESP_OK) {
+            // Non-fatal: keep running; many panels are already powered. Prefer a usable UI.
+            ESP_LOGW(TAG, "LCD_VDD_EN still failing: %s (continuing)", esp_err_to_name(err));
         }
 
-        esp_err_t bk_err = board_internal_set_output(IO_EXP_PIN_BK, enable_backlight);
-        if (bk_err != ESP_OK) {
-            ESP_LOGW(TAG, "Backlight enable write failed: %s", esp_err_to_name(bk_err));
-            err = (err == ESP_OK) ? bk_err : err;
+        for (int attempt = 1; attempt <= 3; ++attempt) {
+            err = board_internal_set_output(IO_EXP_PIN_BK, enable_backlight);
+            if (err == ESP_OK) return ESP_OK;
+            ESP_LOGW(TAG, "DISP(BK_EN) set failed (%s) attempt %d/3", esp_err_to_name(err), attempt);
+            vTaskDelay(pdMS_TO_TICKS(20 * attempt));
         }
+        ESP_LOGE(TAG, "Backlight gate (DISP/BK_EN) failed permanently: %s", esp_err_to_name(err));
+        return err;
     }
 
     return err;
