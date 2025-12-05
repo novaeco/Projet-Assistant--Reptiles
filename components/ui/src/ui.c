@@ -27,7 +27,17 @@ static lv_display_t *s_disp = NULL;
 static lv_indev_t *s_indev = NULL;
 static esp_lcd_panel_handle_t s_panel_handle = NULL;
 static esp_lcd_touch_handle_t s_touch_handle = NULL;
-static volatile uint32_t s_flush_count = 0;
+typedef struct {
+    lv_display_t *disp;
+    volatile uint32_t flush_count;
+    volatile uint32_t vsync_count;
+    volatile uint32_t pending_flush;
+    volatile uint32_t last_flush_vsync;
+    volatile uint32_t last_swap_vsync;
+    volatile uint32_t missed_swap_warning;
+} ui_rgb_sync_t;
+
+static ui_rgb_sync_t s_rgb_sync = {0};
 
 static void ui_create_smoke_label(void);
 static void ui_initial_invalidate_cb(lv_timer_t *timer);
@@ -40,35 +50,62 @@ static void ui_apply_high_contrast_screen(void);
 // Flush Callback (Display)
 // =============================================================================
 
+static bool ui_on_vsync(esp_lcd_panel_handle_t panel, const esp_lcd_rgb_panel_event_data_t *edata, void *user_ctx)
+{
+    (void)panel;
+    (void)edata;
+    ui_rgb_sync_t *sync = (ui_rgb_sync_t *)user_ctx;
+    if (!sync || !sync->disp) {
+        return false;
+    }
+
+    uint32_t vsync = ++sync->vsync_count;
+    if (sync->pending_flush) {
+        sync->pending_flush = 0;
+        sync->last_swap_vsync = vsync;
+        lv_display_flush_ready(sync->disp);
+    } else if ((vsync - sync->last_swap_vsync) > 240U) {
+        sync->missed_swap_warning = 1;
+    }
+
+    return false;
+}
+
 static void ui_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
-    // For RGB interface in Direct Mode, we just need to pass the buffer to the driver
-    // The driver handles the timing.
-    // Note: x2 and y2 in LVGL are inclusive, esp_lcd expects exclusive upper bound? 
-    // Check esp_lcd_panel_draw_bitmap docs: x_end, y_end are exclusive.
-    // But for RGB panel, it usually takes the whole buffer or just swaps.
-    
-    int x1 = area->x1;
-    int y1 = area->y1;
-    int x2 = area->x2 + 1;
-    int y2 = area->y2 + 1;
+    const int x1 = area->x1;
+    const int y1 = area->y1;
+    const int x2 = area->x2 + 1;
+    const int y2 = area->y2 + 1;
+
+    uint32_t pending_before = s_rgb_sync.pending_flush;
+    s_rgb_sync.pending_flush = 1;
+    s_rgb_sync.last_flush_vsync = s_rgb_sync.vsync_count;
+    uint32_t count = ++s_rgb_sync.flush_count;
 
     esp_err_t draw_err = esp_lcd_panel_draw_bitmap(s_panel_handle, x1, y1, x2, y2, px_map);
-    uint32_t count = ++s_flush_count;
     if (count <= 5 || (count % 60U) == 0U) {
-        ESP_LOGI(TAG, "LVGL flush #%u area x%d-%d y%d-%d%s", (unsigned)count, x1, x2 - 1, y1, y2 - 1,
+        ESP_LOGI(TAG, "LVGL flush #%u area x%d-%d y%d-%d vsync=%u pending=%u%s", (unsigned)count, x1, x2 - 1, y1,
+                 y2 - 1, (unsigned)s_rgb_sync.vsync_count, (unsigned)s_rgb_sync.pending_flush,
                  (draw_err == ESP_OK) ? "" : " (draw err)");
     } else {
-        ESP_LOGD(TAG, "flush_cb area x%d-%d y%d-%d (count=%u)%s", x1, x2 - 1, y1, y2 - 1, (unsigned)count,
-                  (draw_err == ESP_OK) ? "" : " draw_err");
+        ESP_LOGD(TAG, "flush_cb area x%d-%d y%d-%d (count=%u vsync=%u)%s", x1, x2 - 1, y1, y2 - 1,
+                  (unsigned)count, (unsigned)s_rgb_sync.vsync_count, (draw_err == ESP_OK) ? "" : " draw_err");
     }
 
     if (draw_err != ESP_OK) {
         ESP_LOGE(TAG, "esp_lcd_panel_draw_bitmap failed: %s", esp_err_to_name(draw_err));
     }
 
-    // Continuous-refresh RGB panel: signal LVGL immediately to avoid timeouts
-    lv_display_flush_ready(disp);
+    if (pending_before) {
+        ESP_LOGW(TAG, "Flush overlap: previous buffer still pending at vsync=%u", (unsigned)s_rgb_sync.last_flush_vsync);
+    }
+
+    if (s_rgb_sync.missed_swap_warning) {
+        s_rgb_sync.missed_swap_warning = 0;
+        ESP_LOGW(TAG, "No buffer swap observed for >240 vsync ticks (vsync=%u flushes=%u)",
+                 (unsigned)s_rgb_sync.vsync_count, (unsigned)s_rgb_sync.flush_count);
+    }
 }
 
 // =============================================================================
@@ -163,6 +200,12 @@ esp_err_t ui_init(void)
     s_disp = lv_display_create(BOARD_LCD_H_RES, BOARD_LCD_V_RES);
     lv_display_set_user_data(s_disp, s_panel_handle);
     lv_display_set_flush_cb(s_disp, ui_flush_cb);
+    s_rgb_sync.disp = s_disp;
+
+    esp_lcd_rgb_panel_event_callbacks_t panel_cbs = {
+        .on_vsync = ui_on_vsync,
+    };
+    ESP_ERROR_CHECK(esp_lcd_rgb_panel_register_event_callbacks((esp_lcd_rgb_panel_handle_t)s_panel_handle, &panel_cbs, &s_rgb_sync));
 
     // 4. Set Buffers (Direct Mode with RGB Panel Buffers)
     void *buf1 = NULL;

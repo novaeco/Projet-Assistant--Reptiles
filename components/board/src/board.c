@@ -166,6 +166,7 @@ static bool board_touch_fetch(uint16_t *x, uint16_t *y, uint8_t *count_out);
 static esp_err_t board_lcd_power_on_sequence(void);
 static esp_err_t board_lcd_selftest_pattern(void);
 static esp_err_t board_lcd_debug_patterns_internal(void);
+static esp_err_t board_lcd_render_test_pattern(void);
 #if CONFIG_BOARD_LCD_STRIPES_TEST
 static void board_lcd_fill_stripes_rgb565(uint16_t *fb, int w, int h);
 #endif
@@ -825,6 +826,82 @@ static void board_lcd_fill_border(uint16_t **fbs, size_t fb_count, size_t h_res,
     }
 }
 
+static void board_lcd_draw_text(uint16_t *fb, size_t h_res, size_t v_res, size_t stride_px, size_t x, size_t y,
+                                const char *text, uint16_t fg, uint16_t bg)
+{
+    typedef struct {
+        char ch;
+        uint8_t rows[7];
+    } glyph5x7_t;
+
+    static const glyph5x7_t font[] = {
+        {'A', {0x1E, 0x05, 0x05, 0x1F, 0x14, 0x14, 0x14}},
+        {'B', {0x1E, 0x15, 0x15, 0x1A, 0x15, 0x15, 0x1E}},
+        {'C', {0x1E, 0x01, 0x01, 0x01, 0x01, 0x01, 0x1E}},
+        {'E', {0x1F, 0x01, 0x01, 0x1F, 0x01, 0x01, 0x1F}},
+        {'F', {0x1F, 0x01, 0x01, 0x1F, 0x01, 0x01, 0x01}},
+        {'H', {0x14, 0x14, 0x14, 0x1F, 0x14, 0x14, 0x14}},
+        {'K', {0x11, 0x09, 0x05, 0x03, 0x05, 0x09, 0x11}},
+        {'L', {0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x1F}},
+        {'M', {0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11}},
+        {'N', {0x11, 0x11, 0x13, 0x15, 0x19, 0x11, 0x11}},
+        {'P', {0x1E, 0x11, 0x11, 0x1E, 0x01, 0x01, 0x01}},
+        {'R', {0x1E, 0x11, 0x11, 0x1E, 0x05, 0x09, 0x11}},
+        {'S', {0x1E, 0x01, 0x01, 0x1E, 0x10, 0x10, 0x0F}},
+        {'T', {0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04}},
+        {'V', {0x11, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x04}},
+        {'Y', {0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04}},
+        {'Z', {0x1F, 0x10, 0x08, 0x04, 0x02, 0x01, 0x1F}},
+        {'0', {0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E}},
+        {'1', {0x04, 0x06, 0x05, 0x04, 0x04, 0x04, 0x0E}},
+        {'2', {0x0E, 0x11, 0x10, 0x08, 0x04, 0x02, 0x1F}},
+        {'3', {0x1F, 0x10, 0x08, 0x0C, 0x10, 0x11, 0x0E}},
+        {'4', {0x10, 0x10, 0x12, 0x12, 0x1F, 0x12, 0x12}},
+        {'5', {0x1F, 0x01, 0x01, 0x0F, 0x10, 0x10, 0x0F}},
+        {'6', {0x18, 0x04, 0x02, 0x0F, 0x11, 0x11, 0x0E}},
+        {'7', {0x1F, 0x10, 0x08, 0x08, 0x04, 0x04, 0x04}},
+        {'8', {0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E}},
+        {'9', {0x0E, 0x11, 0x11, 0x1E, 0x08, 0x04, 0x03}},
+        {' ', {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}},
+    };
+
+    const size_t glyph_w = 5;
+    const size_t glyph_h = 7;
+    const size_t spacing = 2;
+
+    for (const char *p = text; *p; ++p) {
+        char c = *p;
+        const glyph5x7_t *glyph = NULL;
+        for (size_t i = 0; i < sizeof(font) / sizeof(font[0]); ++i) {
+            if (font[i].ch == c) {
+                glyph = &font[i];
+                break;
+            }
+        }
+        if (!glyph) {
+            x += glyph_w + spacing;
+            continue;
+        }
+
+        for (size_t row = 0; row < glyph_h; ++row) {
+            if (y + row >= v_res) {
+                continue;
+            }
+            uint16_t *dst = fb + (y + row) * stride_px + x;
+            uint8_t bits = glyph->rows[row];
+            for (size_t col = 0; col < glyph_w; ++col) {
+                if (x + col >= h_res) {
+                    continue;
+                }
+                bool pixel_on = (bits >> (4 - col)) & 0x1;
+                dst[col] = pixel_on ? fg : bg;
+            }
+        }
+
+        x += glyph_w + spacing;
+    }
+}
+
 static esp_err_t board_lcd_debug_patterns_internal(void)
 {
     void *fb0 = NULL;
@@ -878,6 +955,82 @@ static esp_err_t board_lcd_debug_patterns_internal(void)
     vTaskDelay(pdMS_TO_TICKS(1000));
 
     return ESP_OK;
+}
+
+static esp_err_t board_lcd_render_test_pattern(void)
+{
+#if CONFIG_BOARD_LCD_TEST_PATTERN
+    void *fb0 = NULL;
+    void *fb1 = NULL;
+    esp_err_t fb_err = esp_lcd_rgb_panel_get_frame_buffer(s_lcd_panel_handle, 2, &fb0, &fb1);
+    if (fb_err != ESP_OK) {
+        ESP_LOGE(TAG, "Sharpness test: failed to query frame buffers: %s", esp_err_to_name(fb_err));
+        return fb_err;
+    }
+
+    uint16_t *fbs[2] = {0};
+    size_t fb_count = 0;
+    if (fb0) {
+        fbs[fb_count++] = (uint16_t *)fb0;
+    }
+    if (fb1) {
+        fbs[fb_count++] = (uint16_t *)fb1;
+    }
+
+    if (fb_count == 0) {
+        ESP_LOGE(TAG, "Sharpness test: no frame buffers available");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const size_t h_res = BOARD_LCD_H_RES;
+    const size_t v_res = BOARD_LCD_V_RES;
+    const size_t stride_px = h_res;
+    const size_t one_third = v_res / 3U;
+    const uint16_t white = 0xFFFF;
+    const uint16_t black = 0x0000;
+    const uint16_t gray = 0x7BEF; // 50% gray
+    const uint16_t accent = 0xF800; // red text/accent
+
+    ESP_LOGW(TAG, "Sharpness test: rendering 1px checker + vertical lines for 5s (fb0=%p fb1=%p)", fb0, fb1);
+
+    for (size_t idx = 0; idx < fb_count; ++idx) {
+        uint16_t *fb = fbs[idx];
+        for (size_t y = 0; y < v_res; ++y) {
+            uint16_t *row = fb + y * stride_px;
+            if (y < one_third) {
+                for (size_t x = 0; x < h_res; ++x) {
+                    row[x] = ((x ^ y) & 0x1) ? white : black;
+                }
+            } else if (y < (one_third * 2U)) {
+                for (size_t x = 0; x < h_res; ++x) {
+                    row[x] = (x & 0x1U) ? white : black;
+                }
+            } else {
+                for (size_t x = 0; x < h_res; ++x) {
+                    row[x] = gray;
+                }
+            }
+        }
+
+        size_t text_y = one_third * 2U + 16U;
+        size_t text_x = 16U;
+        board_lcd_draw_text(fb, h_res, v_res, stride_px, text_x, text_y, "SHARPNESS TEST 1PX", accent, gray);
+        text_y += 16U;
+        board_lcd_draw_text(fb, h_res, v_res, stride_px, text_x, text_y, "PCLK STABLE", accent, gray);
+        text_y += 16U;
+        board_lcd_draw_text(fb, h_res, v_res, stride_px, text_x, text_y, "CHECKER/VLINES", accent, gray);
+    }
+
+    esp_err_t draw_err = esp_lcd_panel_draw_bitmap(s_lcd_panel_handle, 0, 0, BOARD_LCD_H_RES, BOARD_LCD_V_RES, fbs[0]);
+    if (draw_err != ESP_OK) {
+        ESP_LOGW(TAG, "Sharpness test: draw_bitmap reported %s", esp_err_to_name(draw_err));
+    }
+    (void)esp_lcd_panel_disp_on(s_lcd_panel_handle, true);
+    vTaskDelay(pdMS_TO_TICKS(5000));
+    return ESP_OK;
+#else
+    return ESP_OK;
+#endif
 }
 
 #if CONFIG_BOARD_LCD_BYPASS_LVGL_SELFTEST
@@ -964,8 +1117,8 @@ static esp_err_t board_lcd_init(void)
     const uint32_t htotal = BOARD_LCD_H_RES + BOARD_LCD_HSYNC_BACK_PORCH + BOARD_LCD_HSYNC_FRONT_PORCH + BOARD_LCD_HSYNC_PULSE_WIDTH;
     const uint32_t vtotal = BOARD_LCD_V_RES + BOARD_LCD_VSYNC_BACK_PORCH + BOARD_LCD_VSYNC_FRONT_PORCH + BOARD_LCD_VSYNC_PULSE_WIDTH;
     const double fps = ((double)BOARD_LCD_PIXEL_CLOCK_HZ) / ((double)htotal * (double)vtotal);
-    const bool pclk_active_neg = false;
-    const bool de_idle_high = false;
+    const bool pclk_active_neg = BOARD_LCD_PCLK_ACTIVE_NEG;
+    const bool de_idle_high = BOARD_LCD_DE_IDLE_HIGH;
 
     ESP_LOGI(TAG, "Initializing RGB LCD Panel %ux%u @ %.2f MHz (Waveshare 7B)", BOARD_LCD_H_RES, BOARD_LCD_V_RES,
              (double)BOARD_LCD_PIXEL_CLOCK_HZ / 1e6);
@@ -1045,9 +1198,16 @@ static esp_err_t board_lcd_init(void)
             .fb_in_psram = 1, // Allocate frame buffer in PSRAM
             .double_fb = 1,
         },
+        .bounce_buffer_size_px = 0,
     };
 
     memcpy(panel_config.data_gpio_nums, data_gpio_nums, sizeof(data_gpio_nums));
+
+    size_t bounce_px = 0;
+    if (panel_config.flags.fb_in_psram && BOARD_LCD_BOUNCE_LINES > 0) {
+        bounce_px = (size_t)BOARD_LCD_H_RES * (size_t)BOARD_LCD_BOUNCE_LINES;
+        panel_config.bounce_buffer_size_px = bounce_px;
+    }
 
     ESP_LOGI(TAG,
              "RGB timing: %ux%u pclk=%uHz hs=[%u bp=%u fp=%u idle_low=%d] vs=[%u bp=%u fp=%u idle_low=%d] DE_idle_high=%d align=%u",
@@ -1055,6 +1215,12 @@ static esp_err_t board_lcd_init(void)
              BOARD_LCD_HSYNC_BACK_PORCH, BOARD_LCD_HSYNC_FRONT_PORCH, BOARD_LCD_HSYNC_IDLE_LOW, BOARD_LCD_VSYNC_PULSE_WIDTH,
              BOARD_LCD_VSYNC_BACK_PORCH, BOARD_LCD_VSYNC_FRONT_PORCH, BOARD_LCD_VSYNC_IDLE_LOW, BOARD_LCD_DE_IDLE_HIGH,
              BOARD_LCD_PSRAM_TRANS_ALIGN);
+    if (bounce_px > 0) {
+        ESP_LOGI(TAG, "RGB bounce buffer: %zu px (%zu bytes) lines=%u", bounce_px, bounce_px * sizeof(uint16_t),
+                 (unsigned)BOARD_LCD_BOUNCE_LINES);
+    } else {
+        ESP_LOGI(TAG, "RGB bounce buffer: disabled (lines=%u)", (unsigned)BOARD_LCD_BOUNCE_LINES);
+    }
 
     esp_err_t err = esp_lcd_new_rgb_panel(&panel_config, &s_lcd_panel_handle);
     if (err != ESP_OK) {
@@ -1085,8 +1251,8 @@ static esp_err_t board_lcd_init(void)
     ESP_RETURN_ON_FALSE(fb0 && fb1, ESP_ERR_INVALID_STATE, TAG, "RGB frame buffers not reported");
 
     const size_t stride_bytes = (size_t)BOARD_LCD_H_RES * sizeof(uint16_t);
-    ESP_LOGI(TAG, "RGB frame buffers: fb0=%p fb1=%p size=%zu stride=%zu align=%u", fb0, fb1, fb_size_bytes, stride_bytes,
-             (unsigned)BOARD_LCD_PSRAM_TRANS_ALIGN);
+    ESP_LOGI(TAG, "RGB frame buffers: fb0=%p fb1=%p size=%zu stride=%zu align=%u num_fbs=%d bounce_px=%zu", fb0, fb1,
+             fb_size_bytes, stride_bytes, (unsigned)BOARD_LCD_PSRAM_TRANS_ALIGN, panel_config.num_fbs, bounce_px);
 
 #if CONFIG_BOARD_LCD_STRIPES_TEST
     ESP_LOGW(TAG, "CONFIG_BOARD_LCD_STRIPES_TEST enabled: filling RGB565 stripes and skipping LVGL bring-up");
@@ -1103,6 +1269,10 @@ static esp_err_t board_lcd_init(void)
     if (dbg_err != ESP_OK) {
         ESP_LOGE(TAG, "LCD debug patterns failed: %s", esp_err_to_name(dbg_err));
     }
+#endif
+
+#if CONFIG_BOARD_LCD_TEST_PATTERN
+    ESP_RETURN_ON_ERROR(board_lcd_render_test_pattern(), TAG, "LCD sharpness test failed");
 #endif
 
 #if CONFIG_BOARD_LCD_BYPASS_LVGL_SELFTEST
