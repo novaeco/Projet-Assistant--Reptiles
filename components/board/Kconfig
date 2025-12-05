@@ -64,6 +64,15 @@ config BOARD_LCD_DE_IDLE_HIGH
         Keep enabled for panels that gate active video when DE is high. Disable
         only if your panel requires DE low during active periods.
 
+config BOARD_LCD_SELFTEST_PATTERN
+    bool "Run RGB panel bring-up selftest pattern"
+    default n
+    help
+        When enabled, the board driver draws a coloured stripe pattern on the
+        LCD immediately after the RGB panel is initialised and before LVGL
+        starts. This helps differentiate panel timing/power issues from LVGL
+        rendering issues (e.g., flush callbacks not being called).
+
 endmenu
 
 config BOARD_BATTERY_RAW_FULL

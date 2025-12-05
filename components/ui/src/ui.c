@@ -25,6 +25,10 @@ static lv_display_t *s_disp = NULL;
 static lv_indev_t *s_indev = NULL;
 static esp_lcd_panel_handle_t s_panel_handle = NULL;
 static esp_lcd_touch_handle_t s_touch_handle = NULL;
+static volatile uint32_t s_flush_count = 0;
+
+static void ui_create_smoke_label(void);
+static void ui_force_initial_refresh(void);
 
 // =============================================================================
 // Flush Callback (Display)
@@ -44,7 +48,12 @@ static void ui_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_m
     int y2 = area->y2 + 1;
 
     esp_lcd_panel_draw_bitmap(s_panel_handle, x1, y1, x2, y2, px_map);
-    ESP_LOGD(TAG, "flush_cb area x%d-%d y%d-%d", x1, x2 - 1, y1, y2 - 1);
+    uint32_t count = ++s_flush_count;
+    if (count <= 5 || (count % 50U) == 0U) {
+        ESP_LOGI(TAG, "LVGL flush #%u area x%d-%d y%d-%d", (unsigned)count, x1, x2 - 1, y1, y2 - 1);
+    } else {
+        ESP_LOGD(TAG, "flush_cb area x%d-%d y%d-%d (count=%u)", x1, x2 - 1, y1, y2 - 1, (unsigned)count);
+    }
 
     // Continuous-refresh RGB panel: signal LVGL immediately to avoid timeouts
     lv_display_flush_ready(disp);
@@ -159,6 +168,9 @@ esp_err_t ui_init(void)
         ui_create_dashboard();
     }
 
+    // 7b. Smoke label to confirm first frame is rendered
+    ui_create_smoke_label();
+
     // 8. Start Tick Timer
     const esp_timer_create_args_t tick_timer_args = {
         .callback = &ui_tick_increment,
@@ -171,5 +183,39 @@ esp_err_t ui_init(void)
     // 9. Create LVGL Task
     xTaskCreatePinnedToCore(ui_task, "lvgl_task", LVGL_TASK_STACK_SIZE, NULL, LVGL_TASK_PRIORITY, NULL, 1);
 
+    // 10. Force an immediate refresh to kick the pipeline and bump flush count
+    ui_force_initial_refresh();
+
     return ESP_OK;
+}
+
+static void ui_create_smoke_label(void)
+{
+    if (!s_disp) {
+        return;
+    }
+    lv_obj_t *smoke = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(smoke, lv_pct(60), lv_pct(20));
+    lv_obj_center(smoke);
+    lv_obj_set_style_bg_color(smoke, lv_color_hex(0x0A5BE0), 0);
+    lv_obj_set_style_bg_opa(smoke, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(smoke, 0, 0);
+    lv_obj_set_style_pad_all(smoke, 8, 0);
+
+    lv_obj_t *label = lv_label_create(smoke);
+    lv_label_set_text(label, "UI OK");
+    lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(label, lv_theme_get_font_large(label), 0);
+    lv_obj_center(label);
+    ESP_LOGI(TAG, "UI smoke label created on top layer");
+}
+
+static void ui_force_initial_refresh(void)
+{
+    if (!s_disp) {
+        return;
+    }
+    lv_refr_now(s_disp);
+    lv_timer_handler();
+    ESP_LOGI(TAG, "LVGL initial refresh forced (flush_count=%u)", (unsigned)s_flush_count);
 }
