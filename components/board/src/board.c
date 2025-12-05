@@ -975,6 +975,16 @@ static esp_err_t board_lcd_init(void)
 
     const size_t fb_size_bytes = (size_t)BOARD_LCD_H_RES * (size_t)BOARD_LCD_V_RES * sizeof(uint16_t);
 
+    static const int data_gpio_nums[] = {
+        BOARD_LCD_DATA_B0, BOARD_LCD_DATA_B1, BOARD_LCD_DATA_B2, BOARD_LCD_DATA_B3, BOARD_LCD_DATA_B4,
+        BOARD_LCD_DATA_G0, BOARD_LCD_DATA_G1, BOARD_LCD_DATA_G2, BOARD_LCD_DATA_G3, BOARD_LCD_DATA_G4, BOARD_LCD_DATA_G5,
+        BOARD_LCD_DATA_R0, BOARD_LCD_DATA_R1, BOARD_LCD_DATA_R2, BOARD_LCD_DATA_R3, BOARD_LCD_DATA_R4,
+    };
+    enum {
+        LCD_DATA_GPIO_COUNT = sizeof(data_gpio_nums) / sizeof(data_gpio_nums[0]),
+    };
+    _Static_assert(LCD_DATA_GPIO_COUNT == 16 || LCD_DATA_GPIO_COUNT == 24, "Unsupported RGB data width");
+
     esp_lcd_rgb_panel_config_t panel_config = {
         .clk_src = LCD_CLK_SRC_DEFAULT,
         .timings = {
@@ -994,7 +1004,7 @@ static esp_err_t board_lcd_init(void)
                 .de_idle_high = BOARD_LCD_DE_IDLE_HIGH,
             },
         },
-        .data_width = 16, // 16-bit RGB bus width matches 16 data lines
+        .data_width = LCD_DATA_GPIO_COUNT,
         .bits_per_pixel = 16, // RGB565
         .num_fbs = 2, // Double buffer in PSRAM
         .dma_burst_size = BOARD_LCD_PSRAM_TRANS_ALIGN,
@@ -1003,16 +1013,13 @@ static esp_err_t board_lcd_init(void)
         .vsync_gpio_num = BOARD_LCD_VSYNC,
         .hsync_gpio_num = BOARD_LCD_HSYNC,
         .de_gpio_num = BOARD_LCD_DE,
-        .data_gpio_nums = {
-            BOARD_LCD_DATA_B0, BOARD_LCD_DATA_B1, BOARD_LCD_DATA_B2, BOARD_LCD_DATA_B3, BOARD_LCD_DATA_B4,
-            BOARD_LCD_DATA_G0, BOARD_LCD_DATA_G1, BOARD_LCD_DATA_G2, BOARD_LCD_DATA_G3, BOARD_LCD_DATA_G4, BOARD_LCD_DATA_G5,
-            BOARD_LCD_DATA_R0, BOARD_LCD_DATA_R1, BOARD_LCD_DATA_R2, BOARD_LCD_DATA_R3, BOARD_LCD_DATA_R4,
-        },
         .flags = {
             .fb_in_psram = 1, // Allocate frame buffer in PSRAM
             .double_fb = 1,
         },
     };
+
+    memcpy(panel_config.data_gpio_nums, data_gpio_nums, sizeof(data_gpio_nums));
 
     ESP_LOGI(TAG,
              "RGB timing: %ux%u pclk=%uHz hs=[%u bp=%u fp=%u idle_low=%d] vs=[%u bp=%u fp=%u idle_low=%d] DE_idle_high=%d align=%u",
