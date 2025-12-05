@@ -101,6 +101,15 @@ config BOARD_LCD_DEBUG_PATTERN_AT_BOOT
         directly into the esp_lcd RGB frame buffers to validate timings,
         stride and polarity. Disable once panel bring-up is complete.
 
+config BOARD_LCD_STRIPES_TEST
+    bool "Fill RGB framebuffers with R/G/B horizontal stripes (LVGL disabled)"
+    default n
+    help
+        When enabled, the board driver fills both RGB framebuffers with three
+        horizontal bands (red, green, blue) after panel initialisation and
+        skips LVGL/UI start-up. Use this to validate the RGB data+polarity
+        chain independently of LVGL rendering.
+
 endmenu
 
 config BOARD_BATTERY_RAW_FULL

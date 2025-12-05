@@ -2,6 +2,7 @@
 #include "ui_lockscreen.h"
 #include "board.h"
 #include "board_pins.h"
+#include "sdkconfig.h"
 #include <stdint.h>
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -31,6 +32,9 @@ static volatile uint32_t s_flush_count = 0;
 static void ui_create_smoke_label(void);
 static void ui_initial_invalidate_cb(lv_timer_t *timer);
 static void ui_build_screens_async(void *arg);
+#if CONFIG_UI_FORCE_HIGH_CONTRAST
+static void ui_apply_high_contrast_screen(void);
+#endif
 
 // =============================================================================
 // Flush Callback (Display)
@@ -133,6 +137,11 @@ esp_err_t ui_init(void)
 {
     ESP_LOGI(TAG, "Initializing UI...");
 
+#if CONFIG_BOARD_LCD_STRIPES_TEST
+    ESP_LOGW(TAG, "CONFIG_BOARD_LCD_STRIPES_TEST enabled: skipping LVGL init to keep RGB stripe pattern visible");
+    return ESP_OK;
+#endif
+
 #if CONFIG_BOARD_LCD_BYPASS_LVGL_SELFTEST
     ESP_LOGW(TAG, "CONFIG_BOARD_LCD_BYPASS_LVGL_SELFTEST enabled: skipping LVGL bring-up");
     return ESP_OK;
@@ -188,6 +197,12 @@ esp_err_t ui_init(void)
     xTaskCreatePinnedToCore(ui_task, "lvgl_task", LVGL_TASK_STACK_SIZE, NULL, LVGL_TASK_PRIORITY, NULL, 1);
 
     // 9. Schedule UI construction asynchronously to avoid blocking app_main
+#if CONFIG_UI_FORCE_HIGH_CONTRAST
+    ui_apply_high_contrast_screen();
+    ESP_LOGW(TAG, "CONFIG_UI_FORCE_HIGH_CONTRAST enabled: standard UI creation skipped");
+    return ESP_OK;
+#endif
+
     bool lockscreen_enabled = false;
     char pin[8] = {0};
     if (storage_nvs_get_str("sys_pin", pin, sizeof(pin)) == ESP_OK && strlen(pin) > 0) {
@@ -220,6 +235,24 @@ static void ui_create_smoke_label(void)
     lv_obj_center(label);
     ESP_LOGI(TAG, "UI smoke label created on active screen");
 }
+
+#if CONFIG_UI_FORCE_HIGH_CONTRAST
+static void ui_apply_high_contrast_screen(void)
+{
+    lv_obj_t *scr = lv_screen_active();
+    lv_obj_clean(scr);
+    lv_obj_set_style_bg_color(scr, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(scr, 0, 0);
+
+    lv_obj_t *label = lv_label_create(scr);
+    lv_label_set_text(label, "BONJOUR");
+    lv_obj_set_style_text_color(label, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_text_font(label, lv_theme_get_font_large(label), 0);
+    lv_obj_center(label);
+    ESP_LOGI(TAG, "High-contrast fallback screen displayed");
+}
+#endif
 
 static void ui_build_screens_async(void *arg)
 {
