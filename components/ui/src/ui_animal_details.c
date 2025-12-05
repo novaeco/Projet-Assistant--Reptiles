@@ -331,7 +331,7 @@ static void build_event_tab(lv_obj_t * parent, const animal_t *animal) {
 // =============================================================================
 
 void ui_create_animal_details_screen(const char *animal_id) {
-    strncpy(current_animal_id, animal_id, 37);
+    strlcpy(current_animal_id, animal_id, sizeof(current_animal_id));
 
     lv_display_t *disp = lv_display_get_default();
     lv_coord_t disp_w = lv_display_get_horizontal_resolution(disp);

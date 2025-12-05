@@ -615,6 +615,11 @@ static esp_err_t board_lcd_init(void)
              BOARD_LCD_VSYNC_BACK_PORCH, BOARD_LCD_VSYNC_FRONT_PORCH, BOARD_LCD_VSYNC_PULSE_WIDTH,
              BOARD_LCD_DISP, BOARD_LCD_PCLK, BOARD_LCD_VSYNC, BOARD_LCD_HSYNC, BOARD_LCD_DE);
     ESP_LOGI(TAG, "LCD totals: htotal=%u vtotal=%u -> fps=%.2f", (unsigned)htotal, (unsigned)vtotal, fps);
+#ifdef CONFIG_LCD_RGB_RESTART_IN_VSYNC
+    ESP_LOGI(TAG, "LCD DMA restart on VSYNC: enabled");
+#else
+    ESP_LOGW(TAG, "LCD DMA restart on VSYNC: disabled (enable CONFIG_LCD_RGB_RESTART_IN_VSYNC for drift resilience)");
+#endif
     ESP_LOGI(TAG,
              "LCD data pins: R0-4=%d,%d,%d,%d,%d G0-5=%d,%d,%d,%d,%d,%d B0-4=%d,%d,%d,%d,%d",
              BOARD_LCD_DATA_R0, BOARD_LCD_DATA_R1, BOARD_LCD_DATA_R2, BOARD_LCD_DATA_R3, BOARD_LCD_DATA_R4,

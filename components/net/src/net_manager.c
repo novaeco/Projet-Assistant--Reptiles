@@ -255,8 +255,8 @@ esp_err_t net_manager_set_credentials(const char *ssid, const char *password, bo
     }
 
     wifi_config_t wifi_cfg = {0};
-    strncpy((char *)wifi_cfg.sta.ssid, ssid, sizeof(wifi_cfg.sta.ssid));
-    strncpy((char *)wifi_cfg.sta.password, password, sizeof(wifi_cfg.sta.password));
+    strlcpy((char *)wifi_cfg.sta.ssid, ssid, sizeof(wifi_cfg.sta.ssid));
+    strlcpy((char *)wifi_cfg.sta.password, password, sizeof(wifi_cfg.sta.password));
 
     esp_err_t err = apply_sta_config_with_recovery(&wifi_cfg);
     if (err == ESP_OK) {
@@ -275,8 +275,8 @@ static bool net_try_load_credentials(wifi_config_t *wifi_cfg)
     esp_err_t err = net_load_credentials_from_nvs(ssid, sizeof(ssid), pass, sizeof(pass));
     if (err == ESP_OK && ssid[0] != '\0') {
         ESP_LOGI(TAG, "Using WiFi credentials from NVS (namespace '%s')", NVS_NAMESPACE);
-        strncpy((char *)wifi_cfg->sta.ssid, ssid, sizeof(wifi_cfg->sta.ssid));
-        strncpy((char *)wifi_cfg->sta.password, pass, sizeof(wifi_cfg->sta.password));
+        strlcpy((char *)wifi_cfg->sta.ssid, ssid, sizeof(wifi_cfg->sta.ssid));
+        strlcpy((char *)wifi_cfg->sta.password, pass, sizeof(wifi_cfg->sta.password));
         return true;
     }
 

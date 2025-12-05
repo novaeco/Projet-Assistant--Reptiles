@@ -9,11 +9,12 @@
 #define BOARD_LCD_H_RES 1024
 #define BOARD_LCD_V_RES 600
 
-// Reference timings for 1024x600 @ 60 Hz (stops rolling/scrolling artefacts)
+// Reference timings for 1024x600. Default pclk lowered to reduce PSRAM DMA
+// underflows on the ESP32-S3 when driving RGB565 from external RAM.
 #ifdef CONFIG_BOARD_LCD_PCLK_HZ
 #define BOARD_LCD_PIXEL_CLOCK_HZ CONFIG_BOARD_LCD_PCLK_HZ
 #else
-#define BOARD_LCD_PIXEL_CLOCK_HZ 51200000
+#define BOARD_LCD_PIXEL_CLOCK_HZ 20000000
 #endif
 
 #ifdef CONFIG_BOARD_LCD_HSYNC_PULSE_WIDTH
