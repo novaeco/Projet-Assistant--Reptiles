@@ -78,6 +78,12 @@
 #define BOARD_LCD_DE_IDLE_HIGH 1
 #endif
 
+#ifdef CONFIG_BOARD_LCD_PSRAM_TRANS_ALIGN
+#define BOARD_LCD_PSRAM_TRANS_ALIGN CONFIG_BOARD_LCD_PSRAM_TRANS_ALIGN
+#else
+#define BOARD_LCD_PSRAM_TRANS_ALIGN 64
+#endif
+
 // RGB565 Data Pins (R0-R4, G0-G5, B0-B4) mapped to the high-order bits of the
 // Waveshare 24-bit bus (R3-R7, G2-G7, B3-B7)
 #define BOARD_LCD_PCLK           GPIO_NUM_7
