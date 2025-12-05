@@ -47,3 +47,9 @@ ESP_ERROR_CHECK(board_set_backlight_percent(80)); // 80 % pour réduire la conso
 ## Licence
 MIT
 # Assistant Reptiles
+
+## Gestion des assets (zéro binaire dans Git)
+- Aucun fichier binaire (bin, elf, jpg/png, polices, etc.) n’est commité dans ce dépôt pour éviter le rejet des demandes d’extraction.
+- Les éventuels visuels LVGL ou assets UI doivent être placés localement dans `public/images/` sans les ajouter à Git.
+- Documentez dans le code ou dans `public/images/README.md` le nom et le format attendus, et chargez-les de manière optionnelle pour que `idf.py build` fonctionne même sans asset.
+- Avant toute PR, exécuter `python tools/no_binary_check.py` pour bloquer immédiatement tout fichier binaire suivi par Git (extensions interdites ou présence d’octets NUL).
