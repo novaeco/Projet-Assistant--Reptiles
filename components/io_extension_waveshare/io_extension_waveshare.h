@@ -14,6 +14,7 @@ typedef struct {
     i2c_master_bus_handle_t bus;
     uint8_t address;
     uint32_t scl_speed_hz;
+    uint8_t retries;
 } io_extension_ws_config_t;
 
 esp_err_t io_extension_ws_init(const io_extension_ws_config_t *config, io_extension_ws_handle_t *handle_out);

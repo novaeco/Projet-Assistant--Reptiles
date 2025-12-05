@@ -605,6 +605,7 @@ static esp_err_t board_ioexp_init_waveshare(void)
         .bus = s_i2c_bus_handle,
         .address = addr,
         .scl_speed_hz = BOARD_I2C_FREQ_HZ,
+        .retries = 3,
     };
 
     for (int attempt = 1; attempt <= attempts; ++attempt) {
