@@ -75,13 +75,20 @@ static void generate_btn_event_cb(lv_event_t * e)
 
 void ui_create_documents_screen(void)
 {
+    lv_display_t *disp = lv_display_get_default();
+    lv_coord_t disp_w = lv_display_get_horizontal_resolution(disp);
+    lv_coord_t disp_h = lv_display_get_vertical_resolution(disp);
+    const lv_coord_t header_height = 60;
+    const lv_coord_t generate_btn_height = 50;
+    const lv_coord_t bottom_margin = 30;
+
     // 1. Screen
     lv_obj_t * scr = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(scr, lv_color_hex(0xF0F0F0), 0);
 
     // 2. Header
     lv_obj_t * header = lv_obj_create(scr);
-    lv_obj_set_size(header, LV_PCT(100), 60);
+    lv_obj_set_size(header, LV_PCT(100), header_height);
     lv_obj_set_pos(header, 0, 0);
     lv_obj_set_style_bg_color(header, lv_palette_darken(LV_PALETTE_GREY, 3), 0);
 
@@ -98,8 +105,9 @@ void ui_create_documents_screen(void)
 
     // 3. List of Reports
     lv_obj_t * list = lv_list_create(scr);
-    lv_obj_set_size(list, LV_PCT(100), lv_pct(100) - 140); // Space for header and bottom button
-    lv_obj_set_y(list, 60);
+    lv_coord_t list_h = disp_h - header_height - generate_btn_height - bottom_margin;
+    lv_obj_set_size(list, disp_w, list_h);
+    lv_obj_set_y(list, header_height);
 
     char **reports = NULL;
     size_t count = 0;

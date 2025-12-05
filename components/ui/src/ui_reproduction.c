@@ -83,7 +83,12 @@ static void add_btn_cb(lv_event_t * e) {
 
 void ui_create_reproduction_screen(const char *animal_id) {
     strncpy(current_animal_id, animal_id, 37);
-    
+
+    lv_display_t *disp = lv_display_get_default();
+    lv_coord_t disp_w = lv_display_get_horizontal_resolution(disp);
+    lv_coord_t disp_h = lv_display_get_vertical_resolution(disp);
+    const lv_coord_t header_height = 60;
+
     animal_t animal;
     if (core_get_animal(animal_id, &animal) != ESP_OK) return;
 
@@ -92,7 +97,7 @@ void ui_create_reproduction_screen(const char *animal_id) {
 
     // Header
     lv_obj_t * header = lv_obj_create(scr_repro);
-    lv_obj_set_size(header, LV_PCT(100), 60);
+    lv_obj_set_size(header, LV_PCT(100), header_height);
     lv_obj_set_pos(header, 0, 0);
     lv_obj_set_style_bg_color(header, lv_palette_main(LV_PALETTE_PINK), 0); // Pink for reproduction
 
@@ -113,8 +118,8 @@ void ui_create_reproduction_screen(const char *animal_id) {
 
     // List
     list_history = lv_list_create(scr_repro);
-    lv_obj_set_size(list_history, LV_PCT(100), lv_pct(100) - 60);
-    lv_obj_set_y(list_history, 60);
+    lv_obj_set_size(list_history, disp_w, disp_h - header_height);
+    lv_obj_set_y(list_history, header_height);
 
     if (animal.event_count == 0) {
         lv_list_add_text(list_history, "Aucune donnée de reproduction.");

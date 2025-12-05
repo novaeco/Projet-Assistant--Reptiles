@@ -332,7 +332,12 @@ static void build_event_tab(lv_obj_t * parent, const animal_t *animal) {
 
 void ui_create_animal_details_screen(const char *animal_id) {
     strncpy(current_animal_id, animal_id, 37);
-    
+
+    lv_display_t *disp = lv_display_get_default();
+    lv_coord_t disp_w = lv_display_get_horizontal_resolution(disp);
+    lv_coord_t disp_h = lv_display_get_vertical_resolution(disp);
+    const lv_coord_t header_height = 60;
+
     animal_t animal;
     if (core_get_animal(animal_id, &animal) != ESP_OK) {
         LV_LOG_ERROR("Failed to load animal %s", animal_id);
@@ -344,7 +349,7 @@ void ui_create_animal_details_screen(const char *animal_id) {
 
     // Header
     lv_obj_t * header = lv_obj_create(scr_details);
-    lv_obj_set_size(header, LV_PCT(100), 60);
+    lv_obj_set_size(header, LV_PCT(100), header_height);
     lv_obj_set_pos(header, 0, 0);
     lv_obj_set_style_bg_color(header, lv_palette_darken(LV_PALETTE_GREY, 3), 0);
 
@@ -360,8 +365,8 @@ void ui_create_animal_details_screen(const char *animal_id) {
 
     // Tab View
     tabview = lv_tabview_create(scr_details);
-    lv_obj_set_size(tabview, LV_PCT(100), lv_pct(100) - 60);
-    lv_obj_set_y(tabview, 60);
+    lv_obj_set_size(tabview, disp_w, disp_h - header_height);
+    lv_obj_set_y(tabview, header_height);
     
     lv_obj_t * t1 = lv_tabview_add_tab(tabview, "Info");
     lv_obj_t * t2 = lv_tabview_add_tab(tabview, "Poids");
