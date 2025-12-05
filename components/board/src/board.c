@@ -994,9 +994,8 @@ static esp_err_t board_lcd_init(void)
                 .de_idle_high = BOARD_LCD_DE_IDLE_HIGH,
             },
         },
-        .data_width = 16, // RGB565 bus width
-        .in_color_format = LCD_COLOR_FMT_RGB565,
-        .out_color_format = LCD_COLOR_FMT_RGB565,
+        .data_width = 16, // 16-bit RGB bus width matches 16 data lines
+        .bits_per_pixel = 16, // RGB565
         .num_fbs = 2, // Double buffer in PSRAM
         .dma_burst_size = BOARD_LCD_PSRAM_TRANS_ALIGN,
         .disp_gpio_num = BOARD_LCD_DISP,
