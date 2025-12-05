@@ -4,10 +4,12 @@ menu "LCD Timing"
 
 config BOARD_LCD_PCLK_HZ
     int "LCD pixel clock (Hz)"
-    default 51200000
+    default 20000000
     help
-        Pixel clock for the RGB panel. 51.2 MHz with the default porches yields
-        a stable 1024x600 @ 60 Hz frame rate on the Waveshare 7B (no rolling).
+        Pixel clock for the RGB panel. The default (20 MHz) prioritises DMA
+        stability on PSRAM-backed frame buffers to avoid rolling/tearing. If
+        your panel bandwidth allows, you can raise this value, but higher
+        frequencies increase the risk of underflow-induced drift.
 
 config BOARD_LCD_HSYNC_PULSE_WIDTH
     int "HSYNC pulse width"

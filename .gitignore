@@ -1,33 +1,50 @@
-# Build artifacts
+# ESP-IDF / CMake build outputs
 build/
 **/build/
 cmake-build-*/
+managed_components/
 *.o
+*.d
 *.a
 *.lo
 *.la
 *.obj
 *.elf
+*.bin
 *.map
-#.bin
-*.hex
 *.out
+*.hex
 *.exe
 *.dll
 *.so
 *.dylib
+*.log
+
+# ESP-IDF configuration artefacts
+sdkconfig
+sdkconfig.old
+sdkconfig.*.bak
+sdkconfig.*.old
+idf.py.save
+
+# Python/IDF tooling caches
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+/.espressif/
 
 # Binary assets (avoid committing)
-#.jpg
-#.jpeg
-#.png
-#.bmp
-#.ico
-#.gif
-#.ttf
-#.otf
-#.woff
-#.woff2
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.ico
+*.gif
+*.ttf
+*.otf
+*.woff
+*.woff2
 
 # IDE/editor files
 .vscode/
