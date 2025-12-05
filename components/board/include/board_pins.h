@@ -6,9 +6,57 @@
 // =============================================================================
 // LCD RGB Interface (Waveshare ESP32-S3-Touch-LCD-7B)
 // =============================================================================
-#define BOARD_LCD_PIXEL_CLOCK_HZ (27 * 1000 * 1000) // 27 MHz for stable 1024x600
-#define BOARD_LCD_H_RES          1024
-#define BOARD_LCD_V_RES          600
+#define BOARD_LCD_H_RES 1024
+#define BOARD_LCD_V_RES 600
+
+// Reference timings for 1024x600 @ 60 Hz (stops rolling/scrolling artefacts)
+#ifdef CONFIG_BOARD_LCD_PCLK_HZ
+#define BOARD_LCD_PIXEL_CLOCK_HZ CONFIG_BOARD_LCD_PCLK_HZ
+#else
+#define BOARD_LCD_PIXEL_CLOCK_HZ 51200000
+#endif
+
+#ifdef CONFIG_BOARD_LCD_HSYNC_PULSE_WIDTH
+#define BOARD_LCD_HSYNC_PULSE_WIDTH CONFIG_BOARD_LCD_HSYNC_PULSE_WIDTH
+#else
+#define BOARD_LCD_HSYNC_PULSE_WIDTH 88
+#endif
+
+#ifdef CONFIG_BOARD_LCD_HSYNC_BACK_PORCH
+#define BOARD_LCD_HSYNC_BACK_PORCH CONFIG_BOARD_LCD_HSYNC_BACK_PORCH
+#else
+#define BOARD_LCD_HSYNC_BACK_PORCH 140
+#endif
+
+#ifdef CONFIG_BOARD_LCD_HSYNC_FRONT_PORCH
+#define BOARD_LCD_HSYNC_FRONT_PORCH CONFIG_BOARD_LCD_HSYNC_FRONT_PORCH
+#else
+#define BOARD_LCD_HSYNC_FRONT_PORCH 92
+#endif
+
+#ifdef CONFIG_BOARD_LCD_VSYNC_PULSE_WIDTH
+#define BOARD_LCD_VSYNC_PULSE_WIDTH CONFIG_BOARD_LCD_VSYNC_PULSE_WIDTH
+#else
+#define BOARD_LCD_VSYNC_PULSE_WIDTH 3
+#endif
+
+#ifdef CONFIG_BOARD_LCD_VSYNC_BACK_PORCH
+#define BOARD_LCD_VSYNC_BACK_PORCH CONFIG_BOARD_LCD_VSYNC_BACK_PORCH
+#else
+#define BOARD_LCD_VSYNC_BACK_PORCH 23
+#endif
+
+#ifdef CONFIG_BOARD_LCD_VSYNC_FRONT_PORCH
+#define BOARD_LCD_VSYNC_FRONT_PORCH CONFIG_BOARD_LCD_VSYNC_FRONT_PORCH
+#else
+#define BOARD_LCD_VSYNC_FRONT_PORCH 9
+#endif
+
+#ifdef CONFIG_BOARD_LCD_PCLK_ACTIVE_NEG
+#define BOARD_LCD_PCLK_ACTIVE_NEG CONFIG_BOARD_LCD_PCLK_ACTIVE_NEG
+#else
+#define BOARD_LCD_PCLK_ACTIVE_NEG 1
+#endif
 
 // RGB565 Data Pins (R0-R4, G0-G5, B0-B4) mapped to the high-order bits of the
 // Waveshare 24-bit bus (R3-R7, G2-G7, B3-B7)

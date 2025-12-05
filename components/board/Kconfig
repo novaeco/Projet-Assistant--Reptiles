@@ -1,5 +1,48 @@
 menu "Board Support"
 
+menu "LCD Timing"
+
+config BOARD_LCD_PCLK_HZ
+    int "LCD pixel clock (Hz)"
+    default 51200000
+    help
+        Pixel clock for the RGB panel. 51.2 MHz with the default porches yields
+        a stable 1024x600 @ 60 Hz frame rate on the Waveshare 7B (no rolling).
+
+config BOARD_LCD_HSYNC_PULSE_WIDTH
+    int "HSYNC pulse width"
+    default 88
+
+config BOARD_LCD_HSYNC_BACK_PORCH
+    int "HSYNC back porch"
+    default 140
+
+config BOARD_LCD_HSYNC_FRONT_PORCH
+    int "HSYNC front porch"
+    default 92
+
+config BOARD_LCD_VSYNC_PULSE_WIDTH
+    int "VSYNC pulse width"
+    default 3
+
+config BOARD_LCD_VSYNC_BACK_PORCH
+    int "VSYNC back porch"
+    default 23
+
+config BOARD_LCD_VSYNC_FRONT_PORCH
+    int "VSYNC front porch"
+    default 9
+
+config BOARD_LCD_PCLK_ACTIVE_NEG
+    bool "PCLK active on negative edge"
+    default y
+    help
+        Keep enabled unless your panel requires sampling on the positive clock
+        edge. Disabling may help if residual tearing/rolling remains after
+        setting correct porches.
+
+endmenu
+
 config BOARD_BATTERY_RAW_FULL
     int "Battery ADC full-scale raw value"
     range 1 255
