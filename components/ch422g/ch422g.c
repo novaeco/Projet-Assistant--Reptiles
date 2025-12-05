@@ -1,6 +1,6 @@
 #include "ch422g.h"
 #include <stdlib.h>
-#include "esp_check.h"
+#include "esp_check_compat.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
