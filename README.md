@@ -3,8 +3,8 @@
 Assistant Administratif Reptiles pour la carte Waveshare ESP32-S3 Touch LCD 7B (1024×600, GT911). Code prêt pour ESP-IDF 6.1 et LVGL 9.4.
 
 ## Prérequis build
-- Utiliser **exclusivement ESP-IDF v6.1.0 release** (tag officiel). Toute autre version (`-dev`, `-dirty`, ou autre tag) est refusée dès la configuration CMake avec un message explicite. Vérifiez votre environnement avec `idf.py --version` et la variable `IDF_PATH` avant de lancer le build.
-- Initialiser l’environnement : `. $IDF_PATH/export.sh` (Linux/macOS) ou `export.bat` (Windows).
+- Utiliser **exclusivement ESP-IDF v6.1.0 release** (tag officiel). Toute autre version (`-dev`, `-dirty`, ou autre tag) est refusée dès la configuration CMake avec un message explicite. Vérifiez votre environnement avec `idf.py --version` et la variable `IDF_PATH` avant de lancer le build ; éviter d'utiliser un checkout `esp-idf-master` si ce n'est pas exactement la 6.1.0.
+- Initialiser l’environnement : `. $IDF_PATH/export.sh` (Linux/macOS) ou, sous Windows, ouvrir **ESP-IDF Command Prompt** (installeur Espressif) ou lancer `export.bat` dans l'installation ESP-IDF 6.1.0 avant d'exécuter `idf.py`.
 - Cible : `esp32s3` (16 MB flash, 8 MB PSRAM)
 - Outils IDF (Python, CMake, Ninja) installés via l’installeur ou `install.sh`
 
@@ -22,6 +22,13 @@ idf.py set-target esp32s3
 idf.py fullclean
 idf.py build
 idf.py -p /dev/ttyUSB0 flash monitor
+```
+
+### Exemple rapide sous Windows (ESP-IDF Command Prompt)
+```powershell
+idf.py set-target esp32s3
+idf.py fullclean
+idf.py build
 ```
 
 ## Tests rapides
