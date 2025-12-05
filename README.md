@@ -2,11 +2,19 @@
 
 Assistant Administratif Reptiles pour la carte Waveshare ESP32-S3 Touch LCD 7B (1024×600, GT911). Code prêt pour ESP-IDF 6.1 et LVGL 9.4.
 
-## Prérequis
-- ESP-IDF **v6.1.0 release (tag officiel, non -dev/dirty)** installé et initialisé (`. $IDF_PATH/export.sh`).
-  Le CMake du projet stoppe la configuration si un IDF "-dev" ou "dirty" est détecté (surcharge possible en définissant `IDF_ALLOW_DEV_RELEASE_OVERRIDE=1`).
+## Prérequis build
+- Utiliser **exclusivement ESP-IDF v6.1.0 release** (tag officiel). Toute autre version (`-dev`, `-dirty`, ou autre tag) est refusée dès la configuration CMake avec un message explicite. Vérifiez votre environnement avec `idf.py --version` et la variable `IDF_PATH` avant de lancer le build.
+- Initialiser l’environnement : `. $IDF_PATH/export.sh` (Linux/macOS) ou `export.bat` (Windows).
 - Cible : `esp32s3` (16 MB flash, 8 MB PSRAM)
-- Python de l’IDF et CMake/Ninja disponibles
+- Outils IDF (Python, CMake, Ninja) installés via l’installeur ou `install.sh`
+
+### Commandes recommandées
+```bash
+idf.py set-target esp32s3
+idf.py fullclean
+idf.py build
+idf.py -p /dev/ttyUSB0 flash monitor
+```
 
 ## Construction et flash
 ```bash
@@ -21,7 +29,8 @@ idf.py -p /dev/ttyUSB0 flash monitor
 - `idf.py -p COMx flash monitor`
 
 ## Points matériels
-- Écran RGB 1024×600 : fréquence PCLK par défaut abaissée à **20 MHz** pour limiter les underflows DMA en PSRAM. Ajustable via `CONFIG_BOARD_LCD_PCLK_HZ` (menuconfig) si vous avez de la marge de bande passante.
+- Écran RGB 1024×600 : fréquence PCLK par défaut **51,2 MHz** (calculée pour ~60 fps avec htotal=1344, vtotal=635). Ajustable via `CONFIG_BOARD_LCD_PCLK_HZ` si un compromis bande passante/stabilité est nécessaire.
+- Polarités configurables (Kconfig) pour HSYNC/VSYNC/DE et front d’échantillonnage PCLK afin d’aligner précisément le panneau Waveshare si une autre révision impose des niveaux différents.
 - Redémarrage automatique du DMA en VSYNC activé (`CONFIG_LCD_RGB_RESTART_IN_VSYNC`) pour rattraper tout drift résiduel.
 - Tactile GT911 (I2C) : géré via `esp_lcd_touch_gt911`.
 - Rétroéclairage : réglable 0–100 % via `board_set_backlight_percent()` et le slider UI Paramètres.
@@ -30,7 +39,7 @@ idf.py -p /dev/ttyUSB0 flash monitor
 
 ## Stabilité affichage RGB
 - Double framebuffer en PSRAM et redémarrage automatique en VSYNC (`CONFIG_LCD_RGB_RESTART_IN_VSYNC`) pour éviter le drift quand la bande passante est saturée.
-- PCLK ajustable : `idf.py menuconfig` → **Board Support → LCD Timing → LCD pixel clock (Hz)**. Conserver 20 MHz par défaut si des artefacts (bandes/horizontal scroll) apparaissent.
+- PCLK ajustable : `idf.py menuconfig` → **Board Support → LCD Timing → LCD pixel clock (Hz)**. Laisser 51,2 MHz pour rester verrouillé à ~60 fps ; descendre progressivement (40 MHz, puis 30 MHz) uniquement si des underflows DMA apparaissent.
 - Optimisations mémoires appliquées via `sdkconfig.defaults` : instructions/RODATA fetch en PSRAM, ligne de cache 32 B, optimisation compilateur "Performance" pour réduire les underflows DMA.
 
 ## Rétroéclairage : options Kconfig

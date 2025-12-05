@@ -9,12 +9,13 @@
 #define BOARD_LCD_H_RES 1024
 #define BOARD_LCD_V_RES 600
 
-// Reference timings for 1024x600. Default pclk lowered to reduce PSRAM DMA
-// underflows on the ESP32-S3 when driving RGB565 from external RAM.
+// Reference timings for 1024x600 @ ~60 fps (htotal 1344, vtotal 635).
+// Default pclk targets the nominal Waveshare timing; lower if DMA underflows
+// appear, but values too low will cause rolling/desync.
 #ifdef CONFIG_BOARD_LCD_PCLK_HZ
 #define BOARD_LCD_PIXEL_CLOCK_HZ CONFIG_BOARD_LCD_PCLK_HZ
 #else
-#define BOARD_LCD_PIXEL_CLOCK_HZ 20000000
+#define BOARD_LCD_PIXEL_CLOCK_HZ 51200000
 #endif
 
 #ifdef CONFIG_BOARD_LCD_HSYNC_PULSE_WIDTH
@@ -57,6 +58,24 @@
 #define BOARD_LCD_PCLK_ACTIVE_NEG CONFIG_BOARD_LCD_PCLK_ACTIVE_NEG
 #else
 #define BOARD_LCD_PCLK_ACTIVE_NEG 1
+#endif
+
+#ifdef CONFIG_BOARD_LCD_HSYNC_IDLE_LOW
+#define BOARD_LCD_HSYNC_IDLE_LOW CONFIG_BOARD_LCD_HSYNC_IDLE_LOW
+#else
+#define BOARD_LCD_HSYNC_IDLE_LOW 0
+#endif
+
+#ifdef CONFIG_BOARD_LCD_VSYNC_IDLE_LOW
+#define BOARD_LCD_VSYNC_IDLE_LOW CONFIG_BOARD_LCD_VSYNC_IDLE_LOW
+#else
+#define BOARD_LCD_VSYNC_IDLE_LOW 0
+#endif
+
+#ifdef CONFIG_BOARD_LCD_DE_IDLE_HIGH
+#define BOARD_LCD_DE_IDLE_HIGH CONFIG_BOARD_LCD_DE_IDLE_HIGH
+#else
+#define BOARD_LCD_DE_IDLE_HIGH 1
 #endif
 
 // RGB565 Data Pins (R0-R4, G0-G5, B0-B4) mapped to the high-order bits of the
