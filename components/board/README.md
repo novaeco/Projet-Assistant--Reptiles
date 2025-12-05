@@ -18,6 +18,8 @@ This component brings up the Waveshare ESP32-S3 Touch LCD 7B (ESP32-S3-WROOM-1 N
 - `CONFIG_BOARD_I2C_PORT/SDA/SCL`: configure the shared I2C master instance (default SDA=8, SCL=9 on I2C0).
 - `CONFIG_BOARD_BACKLIGHT_MAX_DUTY` (int 1..8192, default `8192`): valeur maximale appliquée au canal LEDC pour le rétroéclairage (résolution 13 bits).
 - `CONFIG_BOARD_BATTERY_ENABLE` (bool, default `n`): enable battery sampling via the expander when a battery is fitted.
+- `CONFIG_BOARD_LCD_DEBUG_PATTERN_AT_BOOT` (bool, default `n`): fill both RGB frame buffers with raw RGB565 test patterns before LVGL
+  starts to validate timing, stride and polarity during bring-up.
 
 Battery calibration can also be updated at runtime via `board_battery_set_calibration()`, which persists values to NVS (keys `battery_raw_empty` and `battery_raw_full`).
 
