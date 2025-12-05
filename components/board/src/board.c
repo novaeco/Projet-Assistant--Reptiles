@@ -603,13 +603,18 @@ static esp_err_t board_io_expander_init(void)
 
 static esp_err_t board_lcd_init(void)
 {
+    const uint32_t htotal = BOARD_LCD_H_RES + BOARD_LCD_HSYNC_BACK_PORCH + BOARD_LCD_HSYNC_FRONT_PORCH + BOARD_LCD_HSYNC_PULSE_WIDTH;
+    const uint32_t vtotal = BOARD_LCD_V_RES + BOARD_LCD_VSYNC_BACK_PORCH + BOARD_LCD_VSYNC_FRONT_PORCH + BOARD_LCD_VSYNC_PULSE_WIDTH;
+    const double fps = ((double)BOARD_LCD_PIXEL_CLOCK_HZ) / ((double)htotal * (double)vtotal);
+
     ESP_LOGI(TAG, "Initializing RGB LCD Panel %ux%u @ %.2f MHz (Waveshare 7B)", BOARD_LCD_H_RES, BOARD_LCD_V_RES,
              (double)BOARD_LCD_PIXEL_CLOCK_HZ / 1e6);
     ESP_LOGI(TAG,
              "LCD timing (hsync bp/fp/pw=%u/%u/%u, vsync bp/fp/pw=%u/%u/%u) disp=%d pclk=%d vsync=%d hsync=%d de=%d",
-             152, 48, 162,
-             13, 3, 45,
+             BOARD_LCD_HSYNC_BACK_PORCH, BOARD_LCD_HSYNC_FRONT_PORCH, BOARD_LCD_HSYNC_PULSE_WIDTH,
+             BOARD_LCD_VSYNC_BACK_PORCH, BOARD_LCD_VSYNC_FRONT_PORCH, BOARD_LCD_VSYNC_PULSE_WIDTH,
              BOARD_LCD_DISP, BOARD_LCD_PCLK, BOARD_LCD_VSYNC, BOARD_LCD_HSYNC, BOARD_LCD_DE);
+    ESP_LOGI(TAG, "LCD totals: htotal=%u vtotal=%u -> fps=%.2f", (unsigned)htotal, (unsigned)vtotal, fps);
     ESP_LOGI(TAG,
              "LCD data pins: R0-4=%d,%d,%d,%d,%d G0-5=%d,%d,%d,%d,%d,%d B0-4=%d,%d,%d,%d,%d",
              BOARD_LCD_DATA_R0, BOARD_LCD_DATA_R1, BOARD_LCD_DATA_R2, BOARD_LCD_DATA_R3, BOARD_LCD_DATA_R4,
@@ -634,13 +639,13 @@ static esp_err_t board_lcd_init(void)
             .pclk_hz = BOARD_LCD_PIXEL_CLOCK_HZ,
             .h_res = BOARD_LCD_H_RES,
             .v_res = BOARD_LCD_V_RES,
-            .hsync_back_porch = 152,
-            .hsync_front_porch = 48,
-            .hsync_pulse_width = 162,
-            .vsync_back_porch = 13,
-            .vsync_front_porch = 3,
-            .vsync_pulse_width = 45,
-            .flags.pclk_active_neg = true,
+            .hsync_back_porch = BOARD_LCD_HSYNC_BACK_PORCH,
+            .hsync_front_porch = BOARD_LCD_HSYNC_FRONT_PORCH,
+            .hsync_pulse_width = BOARD_LCD_HSYNC_PULSE_WIDTH,
+            .vsync_back_porch = BOARD_LCD_VSYNC_BACK_PORCH,
+            .vsync_front_porch = BOARD_LCD_VSYNC_FRONT_PORCH,
+            .vsync_pulse_width = BOARD_LCD_VSYNC_PULSE_WIDTH,
+            .flags.pclk_active_neg = BOARD_LCD_PCLK_ACTIVE_NEG,
         },
         .flags.fb_in_psram = 1, // Allocate frame buffer in PSRAM
     };

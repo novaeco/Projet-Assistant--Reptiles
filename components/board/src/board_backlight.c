@@ -58,29 +58,30 @@ static esp_err_t board_backlight_set_enables(bool enable_backlight)
         // I/O extension is an external I2C device (Waveshare CH32V003).
         // At boot it can occasionally NACK/return invalid replies for the very first transactions.
         // Retry a few times to avoid blocking UI bring-up on a transient condition.
+        esp_err_t vdd_err = ESP_FAIL;
+
         for (int attempt = 1; attempt <= 3; ++attempt) {
-            err = board_internal_set_output(IO_EXP_PIN_LCD_VDD, enable_vdd);
-            if (err == ESP_OK) {
+            vdd_err = board_internal_set_output(IO_EXP_PIN_LCD_VDD, enable_vdd);
+            if (vdd_err == ESP_OK || vdd_err == ESP_ERR_INVALID_RESPONSE) {
                 break;
             }
 
-            if (err == ESP_ERR_INVALID_RESPONSE) {
-                s_lcd_vdd_supported = false;
-                if (!s_lcd_vdd_warned_once) {
-                    ESP_LOGW(TAG, "LCD_VDD_EN unsupported/invalid response (%s), continuing", esp_err_to_name(err));
-                    s_lcd_vdd_warned_once = true;
-                }
-                err = ESP_OK;
-                break;
-            }
-
-            ESP_LOGW(TAG, "LCD_VDD_EN set failed (%s) attempt %d/3", esp_err_to_name(err), attempt);
+            ESP_LOGW(TAG, "LCD_VDD_EN set failed (%s) attempt %d/3", esp_err_to_name(vdd_err), attempt);
             vTaskDelay(pdMS_TO_TICKS(20 * attempt));
         }
 
-        if (err != ESP_OK) {
+        if (vdd_err == ESP_ERR_INVALID_RESPONSE) {
+            s_lcd_vdd_supported = false;
+            if (!s_lcd_vdd_warned_once) {
+                ESP_LOGW(TAG, "LCD_VDD_EN unsupported/invalid response (%s), continuing", esp_err_to_name(vdd_err));
+                s_lcd_vdd_warned_once = true;
+            }
+            vdd_err = ESP_OK;
+        }
+
+        if (vdd_err != ESP_OK) {
             // Non-fatal: keep running; many panels are already powered. Prefer a usable UI.
-            ESP_LOGW(TAG, "LCD_VDD_EN still failing: %s (continuing)", esp_err_to_name(err));
+            ESP_LOGW(TAG, "LCD_VDD_EN still failing: %s (continuing)", esp_err_to_name(vdd_err));
         }
     }
 
