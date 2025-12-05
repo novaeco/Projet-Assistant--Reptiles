@@ -166,7 +166,9 @@ static bool board_touch_fetch(uint16_t *x, uint16_t *y, uint8_t *count_out);
 static esp_err_t board_lcd_power_on_sequence(void);
 static esp_err_t board_lcd_selftest_pattern(void);
 static esp_err_t board_lcd_debug_patterns_internal(void);
+#if CONFIG_BOARD_LCD_BYPASS_LVGL_SELFTEST
 static esp_err_t board_lcd_bypass_lvgl_selftest_start(void);
+#endif
 
 static bool board_touch_fetch(uint16_t *x, uint16_t *y, uint8_t *count_out)
 {
@@ -852,6 +854,7 @@ static esp_err_t board_lcd_debug_patterns_internal(void)
     return ESP_OK;
 }
 
+#if CONFIG_BOARD_LCD_BYPASS_LVGL_SELFTEST
 typedef struct {
     uint16_t *fbs[2];
     size_t fb_count;
@@ -881,7 +884,6 @@ static void board_lcd_bypass_lvgl_loop(void *arg)
 
 static esp_err_t board_lcd_bypass_lvgl_selftest_start(void)
 {
-#if CONFIG_BOARD_LCD_BYPASS_LVGL_SELFTEST
     void *fb0 = NULL;
     void *fb1 = NULL;
     esp_err_t err = esp_lcd_rgb_panel_get_frame_buffer(s_lcd_panel_handle, 2, &fb0, &fb1);
@@ -928,10 +930,8 @@ static esp_err_t board_lcd_bypass_lvgl_selftest_start(void)
     }
 
     return ESP_OK;
-#else
-    return ESP_OK;
-#endif
 }
+#endif
 
 static esp_err_t board_lcd_init(void)
 {
@@ -973,20 +973,27 @@ static esp_err_t board_lcd_init(void)
         ESP_LOGW(TAG, "LCD power-on skipped: IO expander not present");
     }
 
+    const size_t fb_size_bytes = (size_t)BOARD_LCD_H_RES * (size_t)BOARD_LCD_V_RES * sizeof(uint16_t);
+    uint16_t *fb_user0 = (uint16_t *)heap_caps_aligned_alloc(BOARD_LCD_PSRAM_TRANS_ALIGN, fb_size_bytes,
+                                                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint16_t *fb_user1 = (uint16_t *)heap_caps_aligned_alloc(BOARD_LCD_PSRAM_TRANS_ALIGN, fb_size_bytes,
+                                                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!fb_user0 || !fb_user1) {
+        ESP_LOGE(TAG, "RGB framebuffer alloc failed (fb0=%p fb1=%p size=%zu align=%u)", fb_user0, fb_user1, fb_size_bytes,
+                 (unsigned)BOARD_LCD_PSRAM_TRANS_ALIGN);
+        free(fb_user0);
+        free(fb_user1);
+        return ESP_ERR_NO_MEM;
+    }
+
+    ESP_LOGI(TAG, "RGB framebuffer alloc: fb0=%p fb1=%p size=%zu align=%u caps=PSRAM|8BIT", fb_user0, fb_user1, fb_size_bytes,
+             (unsigned)BOARD_LCD_PSRAM_TRANS_ALIGN);
+    ESP_RETURN_ON_FALSE(((uintptr_t)fb_user0 % BOARD_LCD_PSRAM_TRANS_ALIGN) == 0 &&
+                            ((uintptr_t)fb_user1 % BOARD_LCD_PSRAM_TRANS_ALIGN) == 0,
+                        ESP_ERR_INVALID_STATE, TAG, "Framebuffers not aligned to %u", (unsigned)BOARD_LCD_PSRAM_TRANS_ALIGN);
+
     esp_lcd_rgb_panel_config_t panel_config = {
-        .data_width = 16, // RGB565
-        .num_fbs = 2,   // Double buffer in PSRAM
         .clk_src = LCD_CLK_SRC_DEFAULT,
-        .disp_gpio_num = BOARD_LCD_DISP,
-        .pclk_gpio_num = BOARD_LCD_PCLK,
-        .vsync_gpio_num = BOARD_LCD_VSYNC,
-        .hsync_gpio_num = BOARD_LCD_HSYNC,
-        .de_gpio_num = BOARD_LCD_DE,
-        .data_gpio_nums = {
-            BOARD_LCD_DATA_B0, BOARD_LCD_DATA_B1, BOARD_LCD_DATA_B2, BOARD_LCD_DATA_B3, BOARD_LCD_DATA_B4,
-            BOARD_LCD_DATA_G0, BOARD_LCD_DATA_G1, BOARD_LCD_DATA_G2, BOARD_LCD_DATA_G3, BOARD_LCD_DATA_G4, BOARD_LCD_DATA_G5,
-            BOARD_LCD_DATA_R0, BOARD_LCD_DATA_R1, BOARD_LCD_DATA_R2, BOARD_LCD_DATA_R3, BOARD_LCD_DATA_R4,
-        },
         .timings = {
             .pclk_hz = BOARD_LCD_PIXEL_CLOCK_HZ,
             .h_res = BOARD_LCD_H_RES,
@@ -1004,8 +1011,25 @@ static esp_err_t board_lcd_init(void)
                 .de_idle_high = BOARD_LCD_DE_IDLE_HIGH,
             },
         },
-        .psram_trans_align = BOARD_LCD_PSRAM_TRANS_ALIGN,
-        .flags.fb_in_psram = 1, // Allocate frame buffer in PSRAM
+        .data_width = 16, // RGB565 bus width
+        .in_color_format = LCD_COLOR_FORMAT_RGB565,
+        .out_color_format = LCD_COLOR_FORMAT_RGB565,
+        .num_fbs = 2, // Double buffer in PSRAM
+        .user_fbs = {fb_user0, fb_user1},
+        .dma_burst_size = BOARD_LCD_PSRAM_TRANS_ALIGN,
+        .disp_gpio_num = BOARD_LCD_DISP,
+        .pclk_gpio_num = BOARD_LCD_PCLK,
+        .vsync_gpio_num = BOARD_LCD_VSYNC,
+        .hsync_gpio_num = BOARD_LCD_HSYNC,
+        .de_gpio_num = BOARD_LCD_DE,
+        .data_gpio_nums = {
+            BOARD_LCD_DATA_B0, BOARD_LCD_DATA_B1, BOARD_LCD_DATA_B2, BOARD_LCD_DATA_B3, BOARD_LCD_DATA_B4,
+            BOARD_LCD_DATA_G0, BOARD_LCD_DATA_G1, BOARD_LCD_DATA_G2, BOARD_LCD_DATA_G3, BOARD_LCD_DATA_G4, BOARD_LCD_DATA_G5,
+            BOARD_LCD_DATA_R0, BOARD_LCD_DATA_R1, BOARD_LCD_DATA_R2, BOARD_LCD_DATA_R3, BOARD_LCD_DATA_R4,
+        },
+        .flags = {
+            .fb_in_psram = 1, // Allocate frame buffer in PSRAM
+        },
     };
 
     ESP_LOGI(TAG,
@@ -1018,18 +1042,28 @@ static esp_err_t board_lcd_init(void)
     esp_err_t err = esp_lcd_new_rgb_panel(&panel_config, &s_lcd_panel_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "RGB panel create failed: %s", esp_err_to_name(err));
+        free(fb_user0);
+        free(fb_user1);
         return err;
     }
 
     err = esp_lcd_panel_reset(s_lcd_panel_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "RGB panel reset failed: %s", esp_err_to_name(err));
+        esp_lcd_panel_del(s_lcd_panel_handle);
+        s_lcd_panel_handle = NULL;
+        free(fb_user0);
+        free(fb_user1);
         return err;
     }
 
     err = esp_lcd_panel_init(s_lcd_panel_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "RGB panel init failed: %s", esp_err_to_name(err));
+        esp_lcd_panel_del(s_lcd_panel_handle);
+        s_lcd_panel_handle = NULL;
+        free(fb_user0);
+        free(fb_user1);
         return err;
     }
 
@@ -1037,7 +1071,6 @@ static esp_err_t board_lcd_init(void)
     void *fb1 = NULL;
     esp_err_t fb_err = esp_lcd_rgb_panel_get_frame_buffer(s_lcd_panel_handle, 2, &fb0, &fb1);
     if (fb_err == ESP_OK) {
-        const size_t fb_size_bytes = (size_t)BOARD_LCD_H_RES * (size_t)BOARD_LCD_V_RES * sizeof(uint16_t);
         const size_t stride_bytes = (size_t)BOARD_LCD_H_RES * sizeof(uint16_t);
         ESP_LOGI(TAG, "RGB frame buffers: fb0=%p fb1=%p size=%zu stride=%zu align=%u", fb0, fb1, fb_size_bytes,
                  stride_bytes, (unsigned)BOARD_LCD_PSRAM_TRANS_ALIGN);
