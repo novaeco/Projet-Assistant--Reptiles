@@ -2,6 +2,10 @@
 build/
 **/build/
 cmake-build-*/
+**/CMakeFiles/
+**/CMakeCache.txt
+**/cmake_install.cmake
+**/install_manifest.txt
 managed_components/
 *.o
 *.d
@@ -19,6 +23,8 @@ managed_components/
 *.so
 *.dylib
 *.log
+*.tmp
+*.bak
 
 # ESP-IDF configuration artefacts
 sdkconfig

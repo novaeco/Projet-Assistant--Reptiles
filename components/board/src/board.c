@@ -614,6 +614,9 @@ static esp_err_t board_lcd_init(void)
              BOARD_LCD_HSYNC_BACK_PORCH, BOARD_LCD_HSYNC_FRONT_PORCH, BOARD_LCD_HSYNC_PULSE_WIDTH,
              BOARD_LCD_VSYNC_BACK_PORCH, BOARD_LCD_VSYNC_FRONT_PORCH, BOARD_LCD_VSYNC_PULSE_WIDTH,
              BOARD_LCD_DISP, BOARD_LCD_PCLK, BOARD_LCD_VSYNC, BOARD_LCD_HSYNC, BOARD_LCD_DE);
+    ESP_LOGI(TAG,
+             "LCD polarities: pclk_active_neg=%d hsync_idle_low=%d vsync_idle_low=%d de_idle_high=%d",
+             BOARD_LCD_PCLK_ACTIVE_NEG, BOARD_LCD_HSYNC_IDLE_LOW, BOARD_LCD_VSYNC_IDLE_LOW, BOARD_LCD_DE_IDLE_HIGH);
     ESP_LOGI(TAG, "LCD totals: htotal=%u vtotal=%u -> fps=%.2f", (unsigned)htotal, (unsigned)vtotal, fps);
 #ifdef CONFIG_LCD_RGB_RESTART_IN_VSYNC
     ESP_LOGI(TAG, "LCD DMA restart on VSYNC: enabled");
@@ -650,7 +653,12 @@ static esp_err_t board_lcd_init(void)
             .vsync_back_porch = BOARD_LCD_VSYNC_BACK_PORCH,
             .vsync_front_porch = BOARD_LCD_VSYNC_FRONT_PORCH,
             .vsync_pulse_width = BOARD_LCD_VSYNC_PULSE_WIDTH,
-            .flags.pclk_active_neg = BOARD_LCD_PCLK_ACTIVE_NEG,
+            .flags = {
+                .pclk_active_neg = BOARD_LCD_PCLK_ACTIVE_NEG,
+                .hsync_idle_low = BOARD_LCD_HSYNC_IDLE_LOW,
+                .vsync_idle_low = BOARD_LCD_VSYNC_IDLE_LOW,
+                .de_idle_high = BOARD_LCD_DE_IDLE_HIGH,
+            },
         },
         .flags.fb_in_psram = 1, // Allocate frame buffer in PSRAM
     };

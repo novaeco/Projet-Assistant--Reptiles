@@ -4,12 +4,12 @@ menu "LCD Timing"
 
 config BOARD_LCD_PCLK_HZ
     int "LCD pixel clock (Hz)"
-    default 20000000
+    default 51200000
     help
-        Pixel clock for the RGB panel. The default (20 MHz) prioritises DMA
-        stability on PSRAM-backed frame buffers to avoid rolling/tearing. If
-        your panel bandwidth allows, you can raise this value, but higher
-        frequencies increase the risk of underflow-induced drift.
+        Pixel clock for the RGB panel. 51.2 MHz matches the Waveshare 1024x600
+        timing for ~60 fps (htotal 1344, vtotal 635). Lowering the frequency
+        reduces bandwidth but can introduce rolling if the panel desynchronises;
+        increase cautiously if DMA underflows appear.
 
 config BOARD_LCD_HSYNC_PULSE_WIDTH
     int "HSYNC pulse width"
@@ -42,6 +42,27 @@ config BOARD_LCD_PCLK_ACTIVE_NEG
         Keep enabled unless your panel requires sampling on the positive clock
         edge. Disabling may help if residual tearing/rolling remains after
         setting correct porches.
+
+config BOARD_LCD_HSYNC_IDLE_LOW
+    bool "HSYNC idle level low (active high pulse)"
+    default n
+    help
+        Leave disabled for panels expecting HSYNC active-low pulses (idle high).
+        Enable only if your LCD datasheet specifies an idle-low HSYNC level.
+
+config BOARD_LCD_VSYNC_IDLE_LOW
+    bool "VSYNC idle level low (active high pulse)"
+    default n
+    help
+        Leave disabled for panels expecting VSYNC active-low pulses (idle high).
+        Enable only if your LCD datasheet specifies an idle-low VSYNC level.
+
+config BOARD_LCD_DE_IDLE_HIGH
+    bool "DE idle level high"
+    default y
+    help
+        Keep enabled for panels that gate active video when DE is high. Disable
+        only if your panel requires DE low during active periods.
 
 endmenu
 
