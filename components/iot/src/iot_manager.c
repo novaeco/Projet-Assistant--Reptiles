@@ -13,12 +13,15 @@
 #include "cJSON.h"
 #include "core_service.h"
 #include "net_manager.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char *TAG = "IOT";
 static esp_mqtt_client_handle_t mqtt_client = NULL;
 static bool mqtt_started = false;
 static esp_timer_handle_t s_mqtt_retry_timer = NULL;
 static uint32_t s_mqtt_backoff_ms = 1000;
+static TaskHandle_t s_mqtt_retry_task = NULL;
 
 // Default broker for testing
 #define MQTT_BROKER_URI "mqtt://test.mosquitto.org"
@@ -26,9 +29,8 @@ static uint32_t s_mqtt_backoff_ms = 1000;
 
 static void mqtt_schedule_start(uint32_t delay_ms);
 
-static void mqtt_retry_cb(void *arg)
+static void mqtt_start_attempt(void)
 {
-    (void)arg;
     if (!mqtt_client) {
         return;
     }
@@ -50,6 +52,23 @@ static void mqtt_retry_cb(void *arg)
     }
 }
 
+static void mqtt_retry_task(void *arg)
+{
+    (void)arg;
+    while (1) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        mqtt_start_attempt();
+    }
+}
+
+static void mqtt_retry_timer_cb(void *arg)
+{
+    (void)arg;
+    if (s_mqtt_retry_task) {
+        xTaskNotifyGive(s_mqtt_retry_task);
+    }
+}
+
 static void mqtt_schedule_start(uint32_t delay_ms)
 {
     if (!net_is_connected()) {
@@ -59,7 +78,7 @@ static void mqtt_schedule_start(uint32_t delay_ms)
 
     if (!s_mqtt_retry_timer) {
         const esp_timer_create_args_t tmr_args = {
-            .callback = mqtt_retry_cb,
+            .callback = mqtt_retry_timer_cb,
             .name = "mqtt_retry",
         };
         ESP_ERROR_CHECK(esp_timer_create(&tmr_args, &s_mqtt_retry_timer));
@@ -137,6 +156,14 @@ esp_err_t iot_init(void)
     // Gate MQTT start on IP acquisition
     ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, ip_event_handler, NULL, NULL));
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, wifi_event_handler, NULL, NULL));
+
+    if (!s_mqtt_retry_task) {
+        BaseType_t task_ok = xTaskCreatePinnedToCore(mqtt_retry_task, "mqtt_retry_task", 4096, NULL, 4, &s_mqtt_retry_task, 1);
+        if (task_ok != pdPASS) {
+            ESP_LOGE(TAG, "Failed to create MQTT retry task");
+            return ESP_FAIL;
+        }
+    }
 
     // Start once network is up
     mqtt_schedule_start(10);
