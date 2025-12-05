@@ -27,6 +27,7 @@ static lv_display_t *s_disp = NULL;
 static lv_indev_t *s_indev = NULL;
 static esp_lcd_panel_handle_t s_panel_handle = NULL;
 static esp_lcd_touch_handle_t s_touch_handle = NULL;
+static volatile uint32_t s_flush_count = 0;
 typedef struct {
     lv_display_t *disp;
     volatile uint32_t flush_count;
@@ -82,6 +83,7 @@ static void ui_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_m
     s_rgb_sync.pending_flush = 1;
     s_rgb_sync.last_flush_vsync = s_rgb_sync.vsync_count;
     uint32_t count = ++s_rgb_sync.flush_count;
+    s_flush_count = count;
 
     esp_err_t draw_err = esp_lcd_panel_draw_bitmap(s_panel_handle, x1, y1, x2, y2, px_map);
     if (count <= 5 || (count % 60U) == 0U) {
@@ -205,7 +207,7 @@ esp_err_t ui_init(void)
     esp_lcd_rgb_panel_event_callbacks_t panel_cbs = {
         .on_vsync = ui_on_vsync,
     };
-    ESP_ERROR_CHECK(esp_lcd_rgb_panel_register_event_callbacks((esp_lcd_rgb_panel_handle_t)s_panel_handle, &panel_cbs, &s_rgb_sync));
+    ESP_ERROR_CHECK(esp_lcd_rgb_panel_register_event_callbacks(s_panel_handle, &panel_cbs, &s_rgb_sync));
 
     // 4. Set Buffers (Direct Mode with RGB Panel Buffers)
     void *buf1 = NULL;
