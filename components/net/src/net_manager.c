@@ -12,6 +12,8 @@
 #include "esp_timer.h"
 #include "sdkconfig.h"
 #include <string.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char *TAG = "NET";
 static const char *NVS_NAMESPACE = "net";
@@ -23,6 +25,7 @@ static bool has_credentials = false;
 static esp_timer_handle_t s_wifi_retry_timer = NULL;
 static uint32_t s_wifi_backoff_ms = 1000; // start at 1s
 static const uint32_t WIFI_RETRY_BACKOFF_MAX_MS = 30000;
+static TaskHandle_t s_wifi_retry_task = NULL;
 
 static esp_err_t apply_sta_config_with_recovery(const wifi_config_t *wifi_config_in)
 {
@@ -74,13 +77,29 @@ static esp_err_t apply_sta_config_with_recovery(const wifi_config_t *wifi_config
     return ESP_OK;
 }
 
-static void wifi_retry_cb(void *arg)
+static void wifi_retry_execute(void)
 {
-    (void)arg;
     ESP_LOGI(TAG, "Wi-Fi reconnect attempt (backoff %ums)", s_wifi_backoff_ms);
     esp_err_t err = esp_wifi_connect();
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "esp_wifi_connect failed during retry: %s", esp_err_to_name(err));
+    }
+}
+
+static void wifi_retry_task(void *arg)
+{
+    (void)arg;
+    while (1) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        wifi_retry_execute();
+    }
+}
+
+static void wifi_retry_timer_cb(void *arg)
+{
+    (void)arg;
+    if (s_wifi_retry_task) {
+        xTaskNotifyGive(s_wifi_retry_task);
     }
 }
 
@@ -91,7 +110,7 @@ static esp_err_t ensure_wifi_retry_timer(void)
     }
 
     const esp_timer_create_args_t tmr_args = {
-        .callback = wifi_retry_cb,
+        .callback = wifi_retry_timer_cb,
         .name = "wifi_retry"
     };
     esp_err_t err = esp_timer_create(&tmr_args, &s_wifi_retry_timer);
@@ -99,6 +118,20 @@ static esp_err_t ensure_wifi_retry_timer(void)
         ESP_LOGE(TAG, "Failed to create Wi-Fi retry timer: %s", esp_err_to_name(err));
     }
     return err;
+}
+
+static esp_err_t ensure_wifi_retry_task(void)
+{
+    if (s_wifi_retry_task) {
+        return ESP_OK;
+    }
+
+    BaseType_t task_ok = xTaskCreatePinnedToCore(wifi_retry_task, "wifi_retry_task", 4096, NULL, 4, &s_wifi_retry_task, 0);
+    if (task_ok != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create Wi-Fi retry task");
+        return ESP_FAIL;
+    }
+    return ESP_OK;
 }
 
 static void stop_wifi_retry_timer_best_effort(void)
@@ -123,6 +156,10 @@ static void schedule_wifi_retry(uint32_t delay_ms)
 {
     if (!has_credentials) {
         ESP_LOGW(TAG, "Wi-Fi credentials not set, waiting...");
+        return;
+    }
+
+    if (ensure_wifi_retry_task() != ESP_OK) {
         return;
     }
 
@@ -327,6 +364,8 @@ esp_err_t net_init(void)
 
     ESP_LOGI(TAG, "Starting Wi-Fi station...");
     ESP_ERROR_CHECK(esp_wifi_start());
+
+    ESP_RETURN_ON_ERROR(ensure_wifi_retry_task(), TAG, "failed to start Wi-Fi retry worker");
 
     // Init SNTP
     esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
