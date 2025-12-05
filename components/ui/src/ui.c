@@ -2,6 +2,7 @@
 #include "ui_lockscreen.h"
 #include "board.h"
 #include "board_pins.h"
+#include <stdint.h>
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -29,6 +30,7 @@ static volatile uint32_t s_flush_count = 0;
 
 static void ui_create_smoke_label(void);
 static void ui_initial_invalidate_cb(lv_timer_t *timer);
+static void ui_build_screens_async(void *arg);
 
 // =============================================================================
 // Flush Callback (Display)
@@ -131,6 +133,11 @@ esp_err_t ui_init(void)
 {
     ESP_LOGI(TAG, "Initializing UI...");
 
+#if CONFIG_BOARD_LCD_BYPASS_LVGL_SELFTEST
+    ESP_LOGW(TAG, "CONFIG_BOARD_LCD_BYPASS_LVGL_SELFTEST enabled: skipping LVGL bring-up");
+    return ESP_OK;
+#endif
+
     // 1. Initialize LVGL
     lv_init();
 
@@ -168,26 +175,7 @@ esp_err_t ui_init(void)
         lv_indev_set_read_cb(s_indev, ui_touch_read_cb);
     }
 
-    // 7. Check for PIN and decide start screen
-    char pin[8] = {0};
-    if (storage_nvs_get_str("sys_pin", pin, sizeof(pin)) == ESP_OK && strlen(pin) > 0) {
-        ui_create_lockscreen();
-    } else {
-        ui_create_dashboard();
-    }
-
-    // 7b. Smoke label to confirm first frame is rendered
-    ui_create_smoke_label();
-
-    // 7c. Defer first invalidate to LVGL timer context to avoid blocking app_main
-    lv_timer_t *initial_invalidate = lv_timer_create(ui_initial_invalidate_cb, 50, NULL);
-    if (initial_invalidate) {
-        lv_timer_set_repeat_count(initial_invalidate, 1);
-    } else {
-        ESP_LOGW(TAG, "Failed to create initial invalidate timer");
-    }
-
-    // 8. Start Tick Timer
+    // 7. Start Tick Timer early so async creation runs in LVGL context
     const esp_timer_create_args_t tick_timer_args = {
         .callback = &ui_tick_increment,
         .name = "lvgl_tick"
@@ -196,8 +184,18 @@ esp_err_t ui_init(void)
     ESP_ERROR_CHECK(esp_timer_create(&tick_timer_args, &tick_timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(tick_timer, LVGL_TICK_PERIOD_MS * 1000));
 
-    // 9. Create LVGL Task
+    // 8. Create LVGL Task
     xTaskCreatePinnedToCore(ui_task, "lvgl_task", LVGL_TASK_STACK_SIZE, NULL, LVGL_TASK_PRIORITY, NULL, 1);
+
+    // 9. Schedule UI construction asynchronously to avoid blocking app_main
+    bool lockscreen_enabled = false;
+    char pin[8] = {0};
+    if (storage_nvs_get_str("sys_pin", pin, sizeof(pin)) == ESP_OK && strlen(pin) > 0) {
+        lockscreen_enabled = true;
+    }
+    if (lv_async_call(ui_build_screens_async, (void *)(uintptr_t)lockscreen_enabled) != LV_RES_OK) {
+        ESP_LOGW(TAG, "Failed to schedule async UI build");
+    }
 
     return ESP_OK;
 }
@@ -221,6 +219,27 @@ static void ui_create_smoke_label(void)
     lv_obj_set_style_text_font(label, lv_theme_get_font_large(label), 0);
     lv_obj_center(label);
     ESP_LOGI(TAG, "UI smoke label created on active screen");
+}
+
+static void ui_build_screens_async(void *arg)
+{
+    bool lockscreen_enabled = (bool)(uintptr_t)arg;
+    if (lockscreen_enabled) {
+        ui_create_lockscreen();
+    } else {
+        ui_create_dashboard();
+    }
+
+    ui_create_smoke_label();
+
+    lv_timer_t *initial_invalidate = lv_timer_create(ui_initial_invalidate_cb, 100, NULL);
+    if (initial_invalidate) {
+        lv_timer_set_repeat_count(initial_invalidate, 1);
+    } else {
+        ESP_LOGW(TAG, "Failed to create initial invalidate timer");
+    }
+
+    ESP_LOGI(TAG, "UI async build complete (lockscreen=%d)", (int)lockscreen_enabled);
 }
 
 static void ui_initial_invalidate_cb(lv_timer_t *timer)

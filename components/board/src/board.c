@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <inttypes.h>
+#include <stdlib.h>
 #include "board.h"
 #include "board_backlight.h"
 #include "board_internal.h"
@@ -165,6 +166,7 @@ static bool board_touch_fetch(uint16_t *x, uint16_t *y, uint8_t *count_out);
 static esp_err_t board_lcd_power_on_sequence(void);
 static esp_err_t board_lcd_selftest_pattern(void);
 static esp_err_t board_lcd_debug_patterns_internal(void);
+static esp_err_t board_lcd_bypass_lvgl_selftest_start(void);
 
 static bool board_touch_fetch(uint16_t *x, uint16_t *y, uint8_t *count_out)
 {
@@ -361,21 +363,36 @@ static esp_err_t io_expander_set_output(uint8_t pin, bool level)
     }
     esp_err_t err = ESP_FAIL;
     const char *driver_label = "none";
-    switch (s_io_driver) {
-    case IO_DRIVER_WAVESHARE:
-        driver_label = "Waveshare";
-        err = io_extension_ws_set_output(s_io_ws, pin, level);
-        break;
-    case IO_DRIVER_CH422:
-        driver_label = "CH422G";
-        err = ch422g_set_output_level(s_ch422, pin, level);
-        break;
-    default:
-        return ESP_ERR_INVALID_STATE;
+    const int attempts = 3;
+
+    for (int attempt = 1; attempt <= attempts; ++attempt) {
+        switch (s_io_driver) {
+        case IO_DRIVER_WAVESHARE:
+            driver_label = "Waveshare";
+            err = io_extension_ws_set_output(s_io_ws, pin, level);
+            break;
+        case IO_DRIVER_CH422:
+            driver_label = "CH422G";
+            err = ch422g_set_output_level(s_ch422, pin, level);
+            break;
+        default:
+            return ESP_ERR_INVALID_STATE;
+        }
+
+        if (err == ESP_OK) {
+            break;
+        }
+
+        if (err == ESP_ERR_INVALID_RESPONSE || attempt < attempts) {
+            ESP_LOGW(TAG_IO, "IOEXT[%s] pin%u write attempt %d/%d failed: %s", driver_label, (unsigned)pin, attempt,
+                     attempts, esp_err_to_name(err));
+            vTaskDelay(pdMS_TO_TICKS(5));
+        }
     }
 
     if (err == ESP_OK) {
         ESP_LOGI(TAG_IO, "IOEXT[%s] pin%u <= %d", driver_label, (unsigned)pin, (int)level);
+        vTaskDelay(pdMS_TO_TICKS(2));
         if (s_io_driver == IO_DRIVER_WAVESHARE) {
             uint8_t outputs = 0;
             esp_err_t rb = io_extension_ws_read_outputs(s_io_ws, &outputs);
@@ -399,7 +416,8 @@ static esp_err_t io_expander_set_output(uint8_t pin, bool level)
             }
         }
     } else {
-        ESP_LOGE(TAG_IO, "IOEXT[%s] pin%u write failed: %s", driver_label, (unsigned)pin, esp_err_to_name(err));
+        ESP_LOGE(TAG_IO, "IOEXT[%s] pin%u write failed after retries: %s", driver_label, (unsigned)pin,
+                 esp_err_to_name(err));
     }
     return err;
 }
@@ -457,18 +475,11 @@ static esp_err_t board_io_expander_post_init_defaults(void)
 {
     ESP_LOGI(TAG_IO, "Applying IO expander defaults (LCD power-up + resets)...");
 
-    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_VDD, true), TAG_IO, "LCD_VDD on failed");
-    vTaskDelay(pdMS_TO_TICKS(15));
-    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_BK, true), TAG_IO, "DISP/BK enable failed");
-    vTaskDelay(pdMS_TO_TICKS(10));
+    ESP_RETURN_ON_ERROR(board_lcd_power_on_sequence(), TAG_IO, "LCD power-on sequence failed");
 
     ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_TOUCH_RST, true), TAG_IO, "TP_RST default high failed");
     ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_SD_CS, true), TAG_IO, "SD CS idle high failed");
     ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_CAN_USB, false), TAG_IO, "CAN/USB default failed");
-    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_RST, false), TAG_IO, "LCD_RST low failed");
-    vTaskDelay(pdMS_TO_TICKS(5));
-    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_RST, true), TAG_IO, "LCD_RST high failed");
-    vTaskDelay(pdMS_TO_TICKS(10));
 
     uint16_t cached = io_expander_cached_state();
     ESP_LOGI(TAG_IO, "IO expander defaults applied (state=0x%04X)", (unsigned)cached);
@@ -671,14 +682,19 @@ static esp_err_t board_lcd_power_on_sequence(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    ESP_LOGI(TAG, "LCD power-up: EXIO6(LCD_VDD_EN)->EXIO2(DISP/BK)->LCD_RST cycle");
-    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_VDD, true), TAG_IO, "LCD_VDD_EN high failed");
-    vTaskDelay(pdMS_TO_TICKS(15));
-    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_BK, true), TAG_IO, "LCD DISP/BK enable failed");
-    vTaskDelay(pdMS_TO_TICKS(10));
-    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_RST, false), TAG_IO, "LCD_RST drive low failed");
+    ESP_LOGI(TAG, "LCD power-up: LCD_VDD_EN -> DISP/BK low -> RST pulse -> DISP/BK on");
+    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_BK, false), TAG_IO, "LCD DISP/BK gate low failed");
     vTaskDelay(pdMS_TO_TICKS(5));
+
+    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_VDD, true), TAG_IO, "LCD_VDD_EN high failed");
+    vTaskDelay(pdMS_TO_TICKS(20));
+
+    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_RST, false), TAG_IO, "LCD_RST drive low failed");
+    vTaskDelay(pdMS_TO_TICKS(15));
     ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_RST, true), TAG_IO, "LCD_RST release failed");
+    vTaskDelay(pdMS_TO_TICKS(40));
+
+    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_BK, true), TAG_IO, "LCD DISP/BK enable failed");
     vTaskDelay(pdMS_TO_TICKS(10));
     return ESP_OK;
 }
@@ -836,6 +852,87 @@ static esp_err_t board_lcd_debug_patterns_internal(void)
     return ESP_OK;
 }
 
+typedef struct {
+    uint16_t *fbs[2];
+    size_t fb_count;
+    size_t h_res;
+    size_t v_res;
+    size_t stride_px;
+} lcd_bypass_ctx_t;
+
+static void board_lcd_bypass_lvgl_loop(void *arg)
+{
+    lcd_bypass_ctx_t *ctx = (lcd_bypass_ctx_t *)arg;
+    const uint16_t solids[] = {0xF800, 0x07E0, 0x001F};
+
+    ESP_LOGW(TAG, "LCD bypass self-test started (fb_count=%u stride_px=%u)", (unsigned)ctx->fb_count,
+             (unsigned)ctx->stride_px);
+
+    while (true) {
+        for (size_t i = 0; i < sizeof(solids) / sizeof(solids[0]); ++i) {
+            board_lcd_fill_color(ctx->fbs, ctx->fb_count, ctx->h_res, ctx->v_res, ctx->stride_px, solids[i]);
+            vTaskDelay(pdMS_TO_TICKS(600));
+        }
+
+        board_lcd_fill_vertical_bands(ctx->fbs, ctx->fb_count, ctx->h_res, ctx->v_res, ctx->stride_px);
+        vTaskDelay(pdMS_TO_TICKS(800));
+    }
+}
+
+static esp_err_t board_lcd_bypass_lvgl_selftest_start(void)
+{
+#if CONFIG_BOARD_LCD_BYPASS_LVGL_SELFTEST
+    void *fb0 = NULL;
+    void *fb1 = NULL;
+    esp_err_t err = esp_lcd_rgb_panel_get_frame_buffer(s_lcd_panel_handle, 2, &fb0, &fb1);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "RGB framebuffer query failed for bypass: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    lcd_bypass_ctx_t *ctx = calloc(1, sizeof(lcd_bypass_ctx_t));
+    if (!ctx) {
+        ESP_LOGE(TAG, "Bypass self-test ctx alloc failed");
+        return ESP_ERR_NO_MEM;
+    }
+
+    if (fb0) {
+        ctx->fbs[ctx->fb_count++] = (uint16_t *)fb0;
+    }
+    if (fb1) {
+        ctx->fbs[ctx->fb_count++] = (uint16_t *)fb1;
+    }
+
+    if (ctx->fb_count == 0) {
+        ESP_LOGE(TAG, "Bypass self-test: no framebuffers reported");
+        free(ctx);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ctx->h_res = BOARD_LCD_H_RES;
+    ctx->v_res = BOARD_LCD_V_RES;
+    ctx->stride_px = BOARD_LCD_H_RES;
+
+    ESP_LOGW(TAG, "LCD bypass self-test configured: fb0=%p fb1=%p stride=%u bytes bpp=16 PCLK=%uHz align=%u flags PCLKneg=%d DEhigh=%d HSidleLow=%d VSidleLow=%d",
+             fb0, fb1, (unsigned)(ctx->stride_px * sizeof(uint16_t)), (unsigned)BOARD_LCD_PIXEL_CLOCK_HZ,
+             (unsigned)BOARD_LCD_PSRAM_TRANS_ALIGN, BOARD_LCD_PCLK_ACTIVE_NEG, BOARD_LCD_DE_IDLE_HIGH,
+             BOARD_LCD_HSYNC_IDLE_LOW, BOARD_LCD_VSYNC_IDLE_LOW);
+
+    (void)esp_lcd_panel_disp_on(s_lcd_panel_handle, true);
+
+    BaseType_t task_ok = xTaskCreatePinnedToCore(board_lcd_bypass_lvgl_loop, "lcd_fb_selftest", 4096, ctx, 4, NULL, 1);
+    if (task_ok != pdPASS) {
+        ESP_LOGE(TAG, "Failed to start bypass self-test task");
+        free(ctx);
+        return ESP_ERR_NO_MEM;
+    }
+
+    return ESP_OK;
+#else
+    return ESP_OK;
+#endif
+}
+
 static esp_err_t board_lcd_init(void)
 {
     const uint32_t htotal = BOARD_LCD_H_RES + BOARD_LCD_HSYNC_BACK_PORCH + BOARD_LCD_HSYNC_FRONT_PORCH + BOARD_LCD_HSYNC_PULSE_WIDTH;
@@ -907,8 +1004,16 @@ static esp_err_t board_lcd_init(void)
                 .de_idle_high = BOARD_LCD_DE_IDLE_HIGH,
             },
         },
+        .psram_trans_align = BOARD_LCD_PSRAM_TRANS_ALIGN,
         .flags.fb_in_psram = 1, // Allocate frame buffer in PSRAM
     };
+
+    ESP_LOGI(TAG,
+             "RGB timing: %ux%u pclk=%uHz hs=[%u bp=%u fp=%u idle_low=%d] vs=[%u bp=%u fp=%u idle_low=%d] DE_idle_high=%d align=%u",
+             BOARD_LCD_H_RES, BOARD_LCD_V_RES, BOARD_LCD_PIXEL_CLOCK_HZ, BOARD_LCD_HSYNC_PULSE_WIDTH,
+             BOARD_LCD_HSYNC_BACK_PORCH, BOARD_LCD_HSYNC_FRONT_PORCH, BOARD_LCD_HSYNC_IDLE_LOW, BOARD_LCD_VSYNC_PULSE_WIDTH,
+             BOARD_LCD_VSYNC_BACK_PORCH, BOARD_LCD_VSYNC_FRONT_PORCH, BOARD_LCD_VSYNC_IDLE_LOW, BOARD_LCD_DE_IDLE_HIGH,
+             BOARD_LCD_PSRAM_TRANS_ALIGN);
 
     esp_err_t err = esp_lcd_new_rgb_panel(&panel_config, &s_lcd_panel_handle);
     if (err != ESP_OK) {
@@ -934,7 +1039,8 @@ static esp_err_t board_lcd_init(void)
     if (fb_err == ESP_OK) {
         const size_t fb_size_bytes = (size_t)BOARD_LCD_H_RES * (size_t)BOARD_LCD_V_RES * sizeof(uint16_t);
         const size_t stride_bytes = (size_t)BOARD_LCD_H_RES * sizeof(uint16_t);
-        ESP_LOGI(TAG, "RGB frame buffers: fb0=%p fb1=%p size=%zu stride=%zu", fb0, fb1, fb_size_bytes, stride_bytes);
+        ESP_LOGI(TAG, "RGB frame buffers: fb0=%p fb1=%p size=%zu stride=%zu align=%u", fb0, fb1, fb_size_bytes,
+                 stride_bytes, (unsigned)BOARD_LCD_PSRAM_TRANS_ALIGN);
     } else {
         ESP_LOGW(TAG, "Failed to query RGB frame buffers: %s", esp_err_to_name(fb_err));
     }
@@ -945,6 +1051,13 @@ static esp_err_t board_lcd_init(void)
     if (dbg_err != ESP_OK) {
         ESP_LOGE(TAG, "LCD debug patterns failed: %s", esp_err_to_name(dbg_err));
     }
+#endif
+
+#if CONFIG_BOARD_LCD_BYPASS_LVGL_SELFTEST
+    ESP_LOGW(TAG, "LCD bypass self-test enabled: LVGL will be skipped in favour of raw framebuffer patterns");
+    ESP_RETURN_ON_ERROR(board_lcd_bypass_lvgl_selftest_start(), TAG, "Bypass self-test start failed");
+    s_board_has_lcd = true;
+    return ESP_OK;
 #endif
 
     ESP_RETURN_ON_ERROR(board_lcd_selftest_pattern(), TAG, "LCD selftest pattern failed");

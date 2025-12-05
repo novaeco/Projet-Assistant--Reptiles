@@ -64,6 +64,24 @@ config BOARD_LCD_DE_IDLE_HIGH
         Keep enabled for panels that gate active video when DE is high. Disable
         only if your panel requires DE low during active periods.
 
+config BOARD_LCD_PSRAM_TRANS_ALIGN
+    int "PSRAM transfer alignment for RGB framebuffers"
+    range 32 256
+    default 64
+    help
+        Align PSRAM RGB transfers to a power-of-two boundary to reduce DMA
+        stalls. 64 bytes is safe for most panels; increase to 128 if traces
+        show misalignment warnings.
+
+config BOARD_LCD_BYPASS_LVGL_SELFTEST
+    bool "Bypass LVGL and loop framebuffer self-test patterns"
+    default n
+    help
+        When enabled, LVGL is skipped and the board driver continuously writes
+        solid colours and colour bars directly into the RGB frame buffers after
+        panel init. Use this to validate PCLK/polarity/porches independently of
+        LVGL. Disable for normal operation.
+
 config BOARD_LCD_SELFTEST_PATTERN
     bool "Run RGB panel bring-up selftest pattern"
     default n
