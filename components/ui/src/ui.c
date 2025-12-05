@@ -28,7 +28,7 @@ static esp_lcd_touch_handle_t s_touch_handle = NULL;
 static volatile uint32_t s_flush_count = 0;
 
 static void ui_create_smoke_label(void);
-static void ui_force_initial_refresh(void);
+static void ui_initial_invalidate_cb(lv_timer_t *timer);
 
 // =============================================================================
 // Flush Callback (Display)
@@ -47,12 +47,18 @@ static void ui_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_m
     int x2 = area->x2 + 1;
     int y2 = area->y2 + 1;
 
-    esp_lcd_panel_draw_bitmap(s_panel_handle, x1, y1, x2, y2, px_map);
+    esp_err_t draw_err = esp_lcd_panel_draw_bitmap(s_panel_handle, x1, y1, x2, y2, px_map);
     uint32_t count = ++s_flush_count;
-    if (count <= 5 || (count % 50U) == 0U) {
-        ESP_LOGI(TAG, "LVGL flush #%u area x%d-%d y%d-%d", (unsigned)count, x1, x2 - 1, y1, y2 - 1);
+    if (count <= 5 || (count % 60U) == 0U) {
+        ESP_LOGI(TAG, "LVGL flush #%u area x%d-%d y%d-%d%s", (unsigned)count, x1, x2 - 1, y1, y2 - 1,
+                 (draw_err == ESP_OK) ? "" : " (draw err)");
     } else {
-        ESP_LOGD(TAG, "flush_cb area x%d-%d y%d-%d (count=%u)", x1, x2 - 1, y1, y2 - 1, (unsigned)count);
+        ESP_LOGD(TAG, "flush_cb area x%d-%d y%d-%d (count=%u)%s", x1, x2 - 1, y1, y2 - 1, (unsigned)count,
+                  (draw_err == ESP_OK) ? "" : " draw_err");
+    }
+
+    if (draw_err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_lcd_panel_draw_bitmap failed: %s", esp_err_to_name(draw_err));
     }
 
     // Continuous-refresh RGB panel: signal LVGL immediately to avoid timeouts
@@ -171,6 +177,14 @@ esp_err_t ui_init(void)
     // 7b. Smoke label to confirm first frame is rendered
     ui_create_smoke_label();
 
+    // 7c. Defer first invalidate to LVGL timer context to avoid blocking app_main
+    lv_timer_t *initial_invalidate = lv_timer_create(ui_initial_invalidate_cb, 50, NULL);
+    if (initial_invalidate) {
+        lv_timer_set_repeat_count(initial_invalidate, 1);
+    } else {
+        ESP_LOGW(TAG, "Failed to create initial invalidate timer");
+    }
+
     // 8. Start Tick Timer
     const esp_timer_create_args_t tick_timer_args = {
         .callback = &ui_tick_increment,
@@ -183,9 +197,6 @@ esp_err_t ui_init(void)
     // 9. Create LVGL Task
     xTaskCreatePinnedToCore(ui_task, "lvgl_task", LVGL_TASK_STACK_SIZE, NULL, LVGL_TASK_PRIORITY, NULL, 1);
 
-    // 10. Force an immediate refresh to kick the pipeline and bump flush count
-    ui_force_initial_refresh();
-
     return ESP_OK;
 }
 
@@ -194,7 +205,7 @@ static void ui_create_smoke_label(void)
     if (!s_disp) {
         return;
     }
-    lv_obj_t *smoke = lv_obj_create(lv_layer_top());
+    lv_obj_t *smoke = lv_obj_create(lv_screen_active());
     lv_obj_set_size(smoke, lv_pct(60), lv_pct(20));
     lv_obj_center(smoke);
     lv_obj_set_style_bg_color(smoke, lv_color_hex(0x0A5BE0), 0);
@@ -207,15 +218,17 @@ static void ui_create_smoke_label(void)
     lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(label, lv_theme_get_font_large(label), 0);
     lv_obj_center(label);
-    ESP_LOGI(TAG, "UI smoke label created on top layer");
+    ESP_LOGI(TAG, "UI smoke label created on active screen");
 }
 
-static void ui_force_initial_refresh(void)
+static void ui_initial_invalidate_cb(lv_timer_t *timer)
 {
-    if (!s_disp) {
-        return;
+    lv_obj_t *screen = lv_screen_active();
+    if (screen) {
+        lv_obj_invalidate(screen);
+        ESP_LOGI(TAG, "LVGL initial deferred invalidate queued (flush_count=%u)", (unsigned)s_flush_count);
     }
-    lv_refr_now(s_disp);
-    lv_timer_handler();
-    ESP_LOGI(TAG, "LVGL initial refresh forced (flush_count=%u)", (unsigned)s_flush_count);
+    if (timer) {
+        lv_timer_del(timer);
+    }
 }
