@@ -98,6 +98,16 @@ esp_err_t board_battery_set_calibration(uint8_t raw_empty, uint8_t raw_full);
 esp_err_t board_battery_get_calibration(uint8_t *raw_empty, uint8_t *raw_full);
 
 /**
+ * @brief Render diagnostic RGB565 patterns directly into the RGB frame buffers.
+ *
+ * This bypasses LVGL and writes into each framebuffer returned by
+ * esp_lcd_rgb_panel_get_frame_buffer() to validate timing/stride/polarity at
+ * the panel level. Intended for bring-up and gated by
+ * CONFIG_BOARD_LCD_DEBUG_PATTERN_AT_BOOT.
+ */
+esp_err_t board_lcd_debug_patterns(void);
+
+/**
  * @brief Route the shared connector to the CAN transceiver or USB bridge.
  *
  * @param enable_can True to enable CAN transceiver mode (IO expander pin

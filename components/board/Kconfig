@@ -73,6 +73,16 @@ config BOARD_LCD_SELFTEST_PATTERN
         starts. This helps differentiate panel timing/power issues from LVGL
         rendering issues (e.g., flush callbacks not being called).
 
+config BOARD_LCD_DEBUG_PATTERN_AT_BOOT
+    bool "Render raw framebuffer debug patterns before LVGL"
+    default n
+    help
+        When enabled, the board driver fills the RGB panel frame buffers with
+        solid colours, vertical bars and border patterns immediately after
+        initialisation (before LVGL starts). This bypasses LVGL and draws
+        directly into the esp_lcd RGB frame buffers to validate timings,
+        stride and polarity. Disable once panel bring-up is complete.
+
 endmenu
 
 config BOARD_BATTERY_RAW_FULL

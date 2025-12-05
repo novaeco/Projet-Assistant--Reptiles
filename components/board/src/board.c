@@ -164,6 +164,7 @@ static esp_err_t gt911_detect_i2c_addr(uint8_t *addr_out, bool can_reset);
 static bool board_touch_fetch(uint16_t *x, uint16_t *y, uint8_t *count_out);
 static esp_err_t board_lcd_power_on_sequence(void);
 static esp_err_t board_lcd_selftest_pattern(void);
+static esp_err_t board_lcd_debug_patterns_internal(void);
 
 static bool board_touch_fetch(uint16_t *x, uint16_t *y, uint8_t *count_out)
 {
@@ -720,6 +721,121 @@ static esp_err_t board_lcd_selftest_pattern(void)
 #endif
 }
 
+static void board_lcd_fill_color(uint16_t **fbs, size_t fb_count, size_t h_res, size_t v_res, size_t stride_px,
+                                 uint16_t color)
+{
+    for (size_t idx = 0; idx < fb_count; ++idx) {
+        uint16_t *fb = fbs[idx];
+        for (size_t y = 0; y < v_res; ++y) {
+            uint16_t *row = fb + y * stride_px;
+            for (size_t x = 0; x < h_res; ++x) {
+                row[x] = color;
+            }
+        }
+    }
+}
+
+static void board_lcd_fill_vertical_bands(uint16_t **fbs, size_t fb_count, size_t h_res, size_t v_res, size_t stride_px)
+{
+    static const uint16_t band_colors[] = {
+        0xF800, // Red
+        0x07E0, // Green
+        0x001F, // Blue
+        0xFFFF, // White
+        0x0000, // Black
+        0xFFE0, // Yellow
+        0x07FF, // Cyan
+        0xF81F  // Magenta
+    };
+
+    const size_t bands = sizeof(band_colors) / sizeof(band_colors[0]);
+    const size_t band_width = h_res / bands;
+
+    for (size_t idx = 0; idx < fb_count; ++idx) {
+        uint16_t *fb = fbs[idx];
+        for (size_t y = 0; y < v_res; ++y) {
+            uint16_t *row = fb + y * stride_px;
+            for (size_t x = 0; x < h_res; ++x) {
+                size_t band = band_width ? (x / band_width) : 0;
+                if (band >= bands) {
+                    band = bands - 1;
+                }
+                row[x] = band_colors[band];
+            }
+        }
+    }
+}
+
+static void board_lcd_fill_border(uint16_t **fbs, size_t fb_count, size_t h_res, size_t v_res, size_t stride_px,
+                                  uint16_t border_color, uint16_t fill_color_inner)
+{
+    for (size_t idx = 0; idx < fb_count; ++idx) {
+        uint16_t *fb = fbs[idx];
+        for (size_t y = 0; y < v_res; ++y) {
+            uint16_t *row = fb + y * stride_px;
+            for (size_t x = 0; x < h_res; ++x) {
+                bool is_border = (y == 0) || (y == v_res - 1) || (x == 0) || (x == h_res - 1);
+                row[x] = is_border ? border_color : fill_color_inner;
+            }
+        }
+    }
+}
+
+static esp_err_t board_lcd_debug_patterns_internal(void)
+{
+    void *fb0 = NULL;
+    void *fb1 = NULL;
+    esp_err_t err = esp_lcd_rgb_panel_get_frame_buffer(s_lcd_panel_handle, 2, &fb0, &fb1);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to get RGB frame buffers: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    uint16_t *fbs[2] = {0};
+    size_t fb_count = 0;
+    if (fb0) {
+        fbs[fb_count++] = (uint16_t *)fb0;
+    }
+    if (fb1) {
+        fbs[fb_count++] = (uint16_t *)fb1;
+    }
+
+    if (fb_count == 0) {
+        ESP_LOGE(TAG, "RGB panel reported no frame buffers");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const size_t h_res = BOARD_LCD_H_RES;
+    const size_t v_res = BOARD_LCD_V_RES;
+    const size_t stride_px = h_res;
+    const size_t stride_bytes = stride_px * sizeof(uint16_t);
+
+    ESP_LOGW(TAG, "LCD debug patterns: h_res=%u v_res=%u stride=%u bytes fb0=%p fb1=%p", (unsigned)h_res,
+             (unsigned)v_res, (unsigned)stride_bytes, fb0, fb1);
+
+    ESP_LOGI(TAG, "Pattern 1/5: solid RED");
+    board_lcd_fill_color(fbs, fb_count, h_res, v_res, stride_px, 0xF800);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    ESP_LOGI(TAG, "Pattern 2/5: solid GREEN");
+    board_lcd_fill_color(fbs, fb_count, h_res, v_res, stride_px, 0x07E0);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    ESP_LOGI(TAG, "Pattern 3/5: solid BLUE");
+    board_lcd_fill_color(fbs, fb_count, h_res, v_res, stride_px, 0x001F);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    ESP_LOGI(TAG, "Pattern 4/5: vertical colour bands");
+    board_lcd_fill_vertical_bands(fbs, fb_count, h_res, v_res, stride_px);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    ESP_LOGI(TAG, "Pattern 5/5: white border on black background");
+    board_lcd_fill_border(fbs, fb_count, h_res, v_res, stride_px, 0xFFFF, 0x0000);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    return ESP_OK;
+}
+
 static esp_err_t board_lcd_init(void)
 {
     const uint32_t htotal = BOARD_LCD_H_RES + BOARD_LCD_HSYNC_BACK_PORCH + BOARD_LCD_HSYNC_FRONT_PORCH + BOARD_LCD_HSYNC_PULSE_WIDTH;
@@ -811,6 +927,25 @@ static esp_err_t board_lcd_init(void)
         ESP_LOGE(TAG, "RGB panel init failed: %s", esp_err_to_name(err));
         return err;
     }
+
+    void *fb0 = NULL;
+    void *fb1 = NULL;
+    esp_err_t fb_err = esp_lcd_rgb_panel_get_frame_buffer(s_lcd_panel_handle, 2, &fb0, &fb1);
+    if (fb_err == ESP_OK) {
+        const size_t fb_size_bytes = (size_t)BOARD_LCD_H_RES * (size_t)BOARD_LCD_V_RES * sizeof(uint16_t);
+        const size_t stride_bytes = (size_t)BOARD_LCD_H_RES * sizeof(uint16_t);
+        ESP_LOGI(TAG, "RGB frame buffers: fb0=%p fb1=%p size=%zu stride=%zu", fb0, fb1, fb_size_bytes, stride_bytes);
+    } else {
+        ESP_LOGW(TAG, "Failed to query RGB frame buffers: %s", esp_err_to_name(fb_err));
+    }
+
+#if CONFIG_BOARD_LCD_DEBUG_PATTERN_AT_BOOT
+    ESP_LOGW(TAG, "LCD debug framebuffer patterns enabled before LVGL bring-up");
+    esp_err_t dbg_err = board_lcd_debug_patterns_internal();
+    if (dbg_err != ESP_OK) {
+        ESP_LOGE(TAG, "LCD debug patterns failed: %s", esp_err_to_name(dbg_err));
+    }
+#endif
 
     ESP_RETURN_ON_ERROR(board_lcd_selftest_pattern(), TAG, "LCD selftest pattern failed");
 
@@ -1050,6 +1185,14 @@ esp_err_t board_init(void)
              board_lcd_is_ready() ? 1 : 0);
 
     return status;
+}
+
+esp_err_t board_lcd_debug_patterns(void)
+{
+    if (!s_lcd_panel_handle) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return board_lcd_debug_patterns_internal();
 }
 
 esp_err_t board_set_backlight_percent(uint8_t percent)

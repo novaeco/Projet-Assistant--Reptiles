@@ -154,10 +154,12 @@ esp_err_t ui_init(void)
     ESP_ERROR_CHECK(esp_lcd_rgb_panel_get_frame_buffer(s_panel_handle, 2, &buf1, &buf2));
 
     // Use Direct Mode: LVGL renders directly into the frame buffer that is not active.
-    lv_display_set_buffers(s_disp, buf1, buf2, BOARD_LCD_H_RES * BOARD_LCD_V_RES * sizeof(uint16_t), LV_DISPLAY_RENDER_MODE_DIRECT);
+    lv_display_set_buffers(s_disp, buf1, buf2, BOARD_LCD_H_RES * BOARD_LCD_V_RES * sizeof(lv_color_t), LV_DISPLAY_RENDER_MODE_DIRECT);
     ESP_LOGI(TAG, "LVGL direct mode buffers: buf1=%p (%s), buf2=%p (%s)",
              buf1, esp_ptr_external_ram(buf1) ? "PSRAM" : "internal",
              buf2, esp_ptr_external_ram(buf2) ? "PSRAM" : "internal");
+    ESP_LOGI(TAG, "LVGL display: hor_res=%d ver_res=%d color_depth=%d render_mode=%d", (int)lv_display_get_horizontal_resolution(s_disp),
+             (int)lv_display_get_vertical_resolution(s_disp), LV_COLOR_DEPTH, (int)lv_display_get_render_mode(s_disp));
 
     // 6. Create Input Device (Touch)
     if (s_touch_handle) {
