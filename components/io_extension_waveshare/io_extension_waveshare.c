@@ -20,10 +20,35 @@ struct io_extension_ws {
 
 static const char *TAG = "io_ext_ws";
 
+static esp_err_t io_extension_ws_read_reg(io_extension_ws_handle_t handle, uint8_t reg, uint8_t *value)
+{
+    if (!handle || !handle->dev) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return i2c_master_transmit_receive(handle->dev, &reg, 1, value, 1, pdMS_TO_TICKS(100));
+}
+
 static esp_err_t io_extension_ws_write(io_extension_ws_handle_t handle, uint8_t reg, uint8_t value)
 {
     uint8_t payload[2] = {reg, value};
-    return i2c_master_transmit(handle->dev, payload, sizeof(payload), pdMS_TO_TICKS(100));
+    esp_err_t err = i2c_master_transmit(handle->dev, payload, sizeof(payload), pdMS_TO_TICKS(100));
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "write reg 0x%02X=0x%02X failed: %s", reg, value, esp_err_to_name(err));
+        return err;
+    }
+
+    uint8_t readback = 0;
+    esp_err_t rb_err = io_extension_ws_read_reg(handle, reg, &readback);
+    if (rb_err == ESP_OK) {
+        if (readback != value) {
+            ESP_LOGW(TAG, "verify reg 0x%02X mismatch (wrote 0x%02X read 0x%02X)", reg, value, readback);
+        } else {
+            ESP_LOGI(TAG, "reg 0x%02X<=0x%02X (verified)", reg, value);
+        }
+    } else {
+        ESP_LOGW(TAG, "reg 0x%02X<=0x%02X written, readback skipped: %s", reg, value, esp_err_to_name(rb_err));
+    }
+    return err;
 }
 
 esp_err_t io_extension_ws_init(const io_extension_ws_config_t *config, io_extension_ws_handle_t *handle_out)
@@ -91,6 +116,12 @@ esp_err_t io_extension_ws_set_pwm_percent(io_extension_ws_handle_t handle, uint8
 
     uint8_t duty = (uint8_t)(((uint32_t)percent * 255 + 50) / 100);
     return io_extension_ws_set_pwm_raw(handle, duty);
+}
+
+esp_err_t io_extension_ws_read_outputs(io_extension_ws_handle_t handle, uint8_t *value_out)
+{
+    ESP_RETURN_ON_FALSE(handle && value_out, ESP_ERR_INVALID_ARG, TAG, "invalid args");
+    return io_extension_ws_read_reg(handle, IO_EXTENSION_IO_OUTPUT_ADDR, value_out);
 }
 
 esp_err_t io_extension_ws_read_inputs(io_extension_ws_handle_t handle, uint8_t *value_out)

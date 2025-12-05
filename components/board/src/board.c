@@ -26,6 +26,7 @@
 #include "board_io_map.h"
 #include "io_extension_waveshare.h"
 #include "ch422g.h"
+#include "esp_heap_caps.h"
 
 #ifndef CONFIG_BOARD_BACKLIGHT_ACTIVE_LOW
 #define CONFIG_BOARD_BACKLIGHT_ACTIVE_LOW 0
@@ -161,6 +162,8 @@ static esp_err_t io_expander_sd_cs(bool assert, void *ctx);
 static void board_i2c_scan(i2c_master_bus_handle_t bus);
 static esp_err_t gt911_detect_i2c_addr(uint8_t *addr_out, bool can_reset);
 static bool board_touch_fetch(uint16_t *x, uint16_t *y, uint8_t *count_out);
+static esp_err_t board_lcd_power_on_sequence(void);
+static esp_err_t board_lcd_selftest_pattern(void);
 
 static bool board_touch_fetch(uint16_t *x, uint16_t *y, uint8_t *count_out)
 {
@@ -355,14 +358,49 @@ static esp_err_t io_expander_set_output(uint8_t pin, bool level)
     if (!s_board_has_expander) {
         return ESP_ERR_INVALID_STATE;
     }
+    esp_err_t err = ESP_FAIL;
+    const char *driver_label = "none";
     switch (s_io_driver) {
     case IO_DRIVER_WAVESHARE:
-        return io_extension_ws_set_output(s_io_ws, pin, level);
+        driver_label = "Waveshare";
+        err = io_extension_ws_set_output(s_io_ws, pin, level);
+        break;
     case IO_DRIVER_CH422:
-        return ch422g_set_output_level(s_ch422, pin, level);
+        driver_label = "CH422G";
+        err = ch422g_set_output_level(s_ch422, pin, level);
+        break;
     default:
         return ESP_ERR_INVALID_STATE;
     }
+
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG_IO, "IOEXT[%s] pin%u <= %d", driver_label, (unsigned)pin, (int)level);
+        if (s_io_driver == IO_DRIVER_WAVESHARE) {
+            uint8_t outputs = 0;
+            esp_err_t rb = io_extension_ws_read_outputs(s_io_ws, &outputs);
+            if (rb == ESP_OK) {
+                bool observed = (outputs & (1U << pin)) != 0;
+                if (observed != level) {
+                    ESP_LOGW(TAG_IO, "IOEXT readback mismatch pin%u (expected %d got %d, reg=0x%02X)",
+                             (unsigned)pin, (int)level, (int)observed, outputs);
+                } else {
+                    ESP_LOGI(TAG_IO, "IOEXT pin%u verified at %d (reg=0x%02X)", (unsigned)pin, (int)observed, outputs);
+                }
+            } else {
+                ESP_LOGW(TAG_IO, "IOEXT pin%u readback skipped: %s", (unsigned)pin, esp_err_to_name(rb));
+            }
+        } else if (s_io_driver == IO_DRIVER_CH422) {
+            uint16_t cached = io_expander_cached_state();
+            bool observed = (cached & (1U << pin)) != 0;
+            if (observed != level) {
+                ESP_LOGW(TAG_IO, "CH422G cached mismatch pin%u (expected %d got %d, reg=0x%04X)",
+                         (unsigned)pin, (int)level, (int)observed, (unsigned)cached);
+            }
+        }
+    } else {
+        ESP_LOGE(TAG_IO, "IOEXT[%s] pin%u write failed: %s", driver_label, (unsigned)pin, esp_err_to_name(err));
+    }
+    return err;
 }
 
 static esp_err_t io_expander_set_pwm_raw(uint8_t duty)
@@ -416,8 +454,13 @@ static esp_err_t io_expander_sd_cs(bool assert, void *ctx)
 
 static esp_err_t board_io_expander_post_init_defaults(void)
 {
+    ESP_LOGI(TAG_IO, "Applying IO expander defaults (LCD power-up + resets)...");
+
     ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_VDD, true), TAG_IO, "LCD_VDD on failed");
-    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_BK, true), TAG_IO, "BK default on failed");
+    vTaskDelay(pdMS_TO_TICKS(15));
+    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_BK, true), TAG_IO, "DISP/BK enable failed");
+    vTaskDelay(pdMS_TO_TICKS(10));
+
     ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_TOUCH_RST, true), TAG_IO, "TP_RST default high failed");
     ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_SD_CS, true), TAG_IO, "SD CS idle high failed");
     ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_CAN_USB, false), TAG_IO, "CAN/USB default failed");
@@ -522,9 +565,21 @@ static esp_err_t board_ioexp_init_ch422(void)
 static esp_err_t board_ioexp_init_waveshare(void)
 {
     const uint8_t addr = 0x24;
-    esp_err_t probe = i2c_master_probe(s_i2c_bus_handle, addr, pdMS_TO_TICKS(150));
+    const int attempts = 3;
+    esp_err_t probe = ESP_FAIL;
+    esp_err_t err = ESP_FAIL;
+
+    for (int attempt = 1; attempt <= attempts; ++attempt) {
+        probe = i2c_master_probe(s_i2c_bus_handle, addr, pdMS_TO_TICKS(150));
+        if (probe == ESP_OK) {
+            ESP_LOGI(TAG_IO, "Waveshare IO extension ACK at 0x%02X (attempt %d/%d)", addr, attempt, attempts);
+            break;
+        }
+        ESP_LOGW(TAG_IO, "Waveshare IO extension no ACK at 0x%02X (attempt %d/%d): %s", addr, attempt, attempts,
+                 esp_err_to_name(probe));
+        vTaskDelay(pdMS_TO_TICKS(20 * attempt));
+    }
     if (probe != ESP_OK) {
-        ESP_LOGW(TAG_IO, "Waveshare IO extension did not ACK at 0x%02X: %s", addr, esp_err_to_name(probe));
         return probe;
     }
 
@@ -534,9 +589,16 @@ static esp_err_t board_ioexp_init_waveshare(void)
         .scl_speed_hz = BOARD_I2C_FREQ_HZ,
     };
 
-    esp_err_t err = io_extension_ws_init(&cfg, &s_io_ws);
+    for (int attempt = 1; attempt <= attempts; ++attempt) {
+        err = io_extension_ws_init(&cfg, &s_io_ws);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG_IO, "Waveshare IO extension init OK (attempt %d/%d)", attempt, attempts);
+            break;
+        }
+        ESP_LOGW(TAG_IO, "Waveshare IO extension init failed attempt %d/%d: %s", attempt, attempts, esp_err_to_name(err));
+        vTaskDelay(pdMS_TO_TICKS(25 * attempt));
+    }
     if (err != ESP_OK) {
-        ESP_LOGW(TAG_IO, "Waveshare IO extension init failed: %s", esp_err_to_name(err));
         return err;
     }
 
@@ -601,6 +663,63 @@ static esp_err_t board_io_expander_init(void)
 // LCD RGB
 // =============================================================================
 
+static esp_err_t board_lcd_power_on_sequence(void)
+{
+    if (!s_board_has_expander) {
+        ESP_LOGW(TAG_IO, "LCD power sequence skipped: IO expander unavailable");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ESP_LOGI(TAG, "LCD power-up: EXIO6(LCD_VDD_EN)->EXIO2(DISP/BK)->LCD_RST cycle");
+    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_VDD, true), TAG_IO, "LCD_VDD_EN high failed");
+    vTaskDelay(pdMS_TO_TICKS(15));
+    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_BK, true), TAG_IO, "LCD DISP/BK enable failed");
+    vTaskDelay(pdMS_TO_TICKS(10));
+    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_RST, false), TAG_IO, "LCD_RST drive low failed");
+    vTaskDelay(pdMS_TO_TICKS(5));
+    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_RST, true), TAG_IO, "LCD_RST release failed");
+    vTaskDelay(pdMS_TO_TICKS(10));
+    return ESP_OK;
+}
+
+static esp_err_t board_lcd_selftest_pattern(void)
+{
+#if CONFIG_BOARD_LCD_SELFTEST_PATTERN
+    const size_t pixel_count = (size_t)BOARD_LCD_H_RES * (size_t)BOARD_LCD_V_RES;
+    const size_t buf_bytes = pixel_count * sizeof(uint16_t);
+    uint16_t *pattern = heap_caps_malloc(buf_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!pattern) {
+        ESP_LOGE(TAG, "LCD selftest buffer alloc failed (%zu bytes)", buf_bytes);
+        return ESP_ERR_NO_MEM;
+    }
+
+    const uint16_t colors[] = {0xF800, 0x07E0, 0x001F, 0xFFE0, 0x07FF, 0xF81F};
+    const size_t band_width = BOARD_LCD_H_RES / 6;
+    for (uint32_t y = 0; y < BOARD_LCD_V_RES; ++y) {
+        for (uint32_t x = 0; x < BOARD_LCD_H_RES; ++x) {
+            size_t band = band_width ? (x / band_width) % 6U : 0U;
+            if (((y / 40U) % 2U) != 0U) {
+                band = (band + 3U) % 6U;
+            }
+            pattern[(size_t)y * BOARD_LCD_H_RES + x] = colors[band];
+        }
+    }
+
+    ESP_LOGI(TAG, "LCD selftest enabled: drawing color pattern (%zu bytes)", buf_bytes);
+    esp_err_t err = esp_lcd_panel_draw_bitmap(s_lcd_panel_handle, 0, 0, BOARD_LCD_H_RES, BOARD_LCD_V_RES, pattern);
+    free(pattern);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "LCD selftest pattern rendered");
+    } else {
+        ESP_LOGE(TAG, "LCD selftest draw failed: %s", esp_err_to_name(err));
+    }
+    vTaskDelay(pdMS_TO_TICKS(50));
+    return err;
+#else
+    return ESP_OK;
+#endif
+}
+
 static esp_err_t board_lcd_init(void)
 {
     const uint32_t htotal = BOARD_LCD_H_RES + BOARD_LCD_HSYNC_BACK_PORCH + BOARD_LCD_HSYNC_FRONT_PORCH + BOARD_LCD_HSYNC_PULSE_WIDTH;
@@ -618,6 +737,9 @@ static esp_err_t board_lcd_init(void)
              "LCD polarities: pclk_active_neg=%d hsync_idle_low=%d vsync_idle_low=%d de_idle_high=%d",
              BOARD_LCD_PCLK_ACTIVE_NEG, BOARD_LCD_HSYNC_IDLE_LOW, BOARD_LCD_VSYNC_IDLE_LOW, BOARD_LCD_DE_IDLE_HIGH);
     ESP_LOGI(TAG, "LCD totals: htotal=%u vtotal=%u -> fps=%.2f", (unsigned)htotal, (unsigned)vtotal, fps);
+#if CONFIG_BOARD_LCD_SELFTEST_PATTERN
+    ESP_LOGW(TAG, "LCD selftest pattern is ENABLED and will run before LVGL");
+#endif
 #ifdef CONFIG_LCD_RGB_RESTART_IN_VSYNC
     ESP_LOGI(TAG, "LCD DMA restart on VSYNC: enabled");
 #else
@@ -628,6 +750,15 @@ static esp_err_t board_lcd_init(void)
              BOARD_LCD_DATA_R0, BOARD_LCD_DATA_R1, BOARD_LCD_DATA_R2, BOARD_LCD_DATA_R3, BOARD_LCD_DATA_R4,
              BOARD_LCD_DATA_G0, BOARD_LCD_DATA_G1, BOARD_LCD_DATA_G2, BOARD_LCD_DATA_G3, BOARD_LCD_DATA_G4, BOARD_LCD_DATA_G5,
              BOARD_LCD_DATA_B0, BOARD_LCD_DATA_B1, BOARD_LCD_DATA_B2, BOARD_LCD_DATA_B3, BOARD_LCD_DATA_B4);
+
+    if (s_board_has_expander) {
+        esp_err_t pwr_err = board_lcd_power_on_sequence();
+        if (pwr_err != ESP_OK) {
+            ESP_LOGW(TAG, "LCD power-on sequence reported: %s", esp_err_to_name(pwr_err));
+        }
+    } else {
+        ESP_LOGW(TAG, "LCD power-on skipped: IO expander not present");
+    }
 
     esp_lcd_rgb_panel_config_t panel_config = {
         .data_width = 16, // RGB565
@@ -680,6 +811,8 @@ static esp_err_t board_lcd_init(void)
         ESP_LOGE(TAG, "RGB panel init failed: %s", esp_err_to_name(err));
         return err;
     }
+
+    ESP_RETURN_ON_ERROR(board_lcd_selftest_pattern(), TAG, "LCD selftest pattern failed");
 
     s_board_has_lcd = true;
     return ESP_OK;
