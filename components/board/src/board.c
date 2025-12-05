@@ -974,23 +974,6 @@ static esp_err_t board_lcd_init(void)
     }
 
     const size_t fb_size_bytes = (size_t)BOARD_LCD_H_RES * (size_t)BOARD_LCD_V_RES * sizeof(uint16_t);
-    uint16_t *fb_user0 = (uint16_t *)heap_caps_aligned_alloc(BOARD_LCD_PSRAM_TRANS_ALIGN, fb_size_bytes,
-                                                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    uint16_t *fb_user1 = (uint16_t *)heap_caps_aligned_alloc(BOARD_LCD_PSRAM_TRANS_ALIGN, fb_size_bytes,
-                                                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!fb_user0 || !fb_user1) {
-        ESP_LOGE(TAG, "RGB framebuffer alloc failed (fb0=%p fb1=%p size=%zu align=%u)", fb_user0, fb_user1, fb_size_bytes,
-                 (unsigned)BOARD_LCD_PSRAM_TRANS_ALIGN);
-        free(fb_user0);
-        free(fb_user1);
-        return ESP_ERR_NO_MEM;
-    }
-
-    ESP_LOGI(TAG, "RGB framebuffer alloc: fb0=%p fb1=%p size=%zu align=%u caps=PSRAM|8BIT", fb_user0, fb_user1, fb_size_bytes,
-             (unsigned)BOARD_LCD_PSRAM_TRANS_ALIGN);
-    ESP_RETURN_ON_FALSE(((uintptr_t)fb_user0 % BOARD_LCD_PSRAM_TRANS_ALIGN) == 0 &&
-                            ((uintptr_t)fb_user1 % BOARD_LCD_PSRAM_TRANS_ALIGN) == 0,
-                        ESP_ERR_INVALID_STATE, TAG, "Framebuffers not aligned to %u", (unsigned)BOARD_LCD_PSRAM_TRANS_ALIGN);
 
     esp_lcd_rgb_panel_config_t panel_config = {
         .clk_src = LCD_CLK_SRC_DEFAULT,
@@ -1012,10 +995,9 @@ static esp_err_t board_lcd_init(void)
             },
         },
         .data_width = 16, // RGB565 bus width
-        .in_color_format = LCD_COLOR_FORMAT_RGB565,
-        .out_color_format = LCD_COLOR_FORMAT_RGB565,
+        .in_color_format = LCD_COLOR_FMT_RGB565,
+        .out_color_format = LCD_COLOR_FMT_RGB565,
         .num_fbs = 2, // Double buffer in PSRAM
-        .user_fbs = {fb_user0, fb_user1},
         .dma_burst_size = BOARD_LCD_PSRAM_TRANS_ALIGN,
         .disp_gpio_num = BOARD_LCD_DISP,
         .pclk_gpio_num = BOARD_LCD_PCLK,
@@ -1029,6 +1011,7 @@ static esp_err_t board_lcd_init(void)
         },
         .flags = {
             .fb_in_psram = 1, // Allocate frame buffer in PSRAM
+            .double_fb = 1,
         },
     };
 
@@ -1042,8 +1025,6 @@ static esp_err_t board_lcd_init(void)
     esp_err_t err = esp_lcd_new_rgb_panel(&panel_config, &s_lcd_panel_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "RGB panel create failed: %s", esp_err_to_name(err));
-        free(fb_user0);
-        free(fb_user1);
         return err;
     }
 
@@ -1052,8 +1033,6 @@ static esp_err_t board_lcd_init(void)
         ESP_LOGE(TAG, "RGB panel reset failed: %s", esp_err_to_name(err));
         esp_lcd_panel_del(s_lcd_panel_handle);
         s_lcd_panel_handle = NULL;
-        free(fb_user0);
-        free(fb_user1);
         return err;
     }
 
@@ -1062,21 +1041,18 @@ static esp_err_t board_lcd_init(void)
         ESP_LOGE(TAG, "RGB panel init failed: %s", esp_err_to_name(err));
         esp_lcd_panel_del(s_lcd_panel_handle);
         s_lcd_panel_handle = NULL;
-        free(fb_user0);
-        free(fb_user1);
         return err;
     }
 
     void *fb0 = NULL;
     void *fb1 = NULL;
     esp_err_t fb_err = esp_lcd_rgb_panel_get_frame_buffer(s_lcd_panel_handle, 2, &fb0, &fb1);
-    if (fb_err == ESP_OK) {
-        const size_t stride_bytes = (size_t)BOARD_LCD_H_RES * sizeof(uint16_t);
-        ESP_LOGI(TAG, "RGB frame buffers: fb0=%p fb1=%p size=%zu stride=%zu align=%u", fb0, fb1, fb_size_bytes,
-                 stride_bytes, (unsigned)BOARD_LCD_PSRAM_TRANS_ALIGN);
-    } else {
-        ESP_LOGW(TAG, "Failed to query RGB frame buffers: %s", esp_err_to_name(fb_err));
-    }
+    ESP_RETURN_ON_ERROR(fb_err, TAG, "Failed to query RGB frame buffers: %s", esp_err_to_name(fb_err));
+    ESP_RETURN_ON_FALSE(fb0 && fb1, ESP_ERR_INVALID_STATE, TAG, "RGB frame buffers not reported");
+
+    const size_t stride_bytes = (size_t)BOARD_LCD_H_RES * sizeof(uint16_t);
+    ESP_LOGI(TAG, "RGB frame buffers: fb0=%p fb1=%p size=%zu stride=%zu align=%u", fb0, fb1, fb_size_bytes, stride_bytes,
+             (unsigned)BOARD_LCD_PSRAM_TRANS_ALIGN);
 
 #if CONFIG_BOARD_LCD_DEBUG_PATTERN_AT_BOOT
     ESP_LOGW(TAG, "LCD debug framebuffer patterns enabled before LVGL bring-up");
