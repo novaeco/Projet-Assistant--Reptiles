@@ -4,7 +4,20 @@ menu "LCD Timing"
 
 config BOARD_LCD_PCLK_HZ
     int "LCD pixel clock (Hz)"
-    default 51200000
+    default 30000000
+    help
+        Default stable Waveshare profile at 30 MHz to avoid PSRAM starvation on
+        ESP32-S3. Validated presets: 30 MHz (stable), 40 MHz (balanced),
+        51.2 MHz (nominal Waveshare timing). Increase only if bandwidth and
+        PSRAM timings allow; higher clocks raise underflow risk.
+
+config BOARD_LCD_PCLK_40MHZ
+    bool "Allow 40 MHz PCLK (balanced)"
+    default y
+
+config BOARD_LCD_PCLK_51MHZ
+    bool "Allow 51.2 MHz PCLK (aggressive)"
+    default y
     help
         Pixel clock for the RGB panel. 51.2 MHz matches the Waveshare 1024x600
         timing for ~60 fps (htotal 1344, vtotal 635). Lowering the frequency
@@ -35,7 +48,7 @@ config BOARD_LCD_VSYNC_FRONT_PORCH
     int "VSYNC front porch"
     default 9
 
-config BOARD_LCD_PCLK_ACTIVE_NEG
+config BOARD_LCD_POL_PCLK_ACTIVE_NEG
     bool "PCLK active on negative edge"
     default y
     help
@@ -43,26 +56,34 @@ config BOARD_LCD_PCLK_ACTIVE_NEG
         edge. Disabling may help if residual tearing/rolling remains after
         setting correct porches.
 
-config BOARD_LCD_HSYNC_IDLE_LOW
+config BOARD_LCD_POL_HSYNC_IDLE_LOW
     bool "HSYNC idle level low (active high pulse)"
     default n
     help
         Leave disabled for panels expecting HSYNC active-low pulses (idle high).
         Enable only if your LCD datasheet specifies an idle-low HSYNC level.
 
-config BOARD_LCD_VSYNC_IDLE_LOW
+config BOARD_LCD_POL_VSYNC_IDLE_LOW
     bool "VSYNC idle level low (active high pulse)"
     default n
     help
         Leave disabled for panels expecting VSYNC active-low pulses (idle high).
         Enable only if your LCD datasheet specifies an idle-low VSYNC level.
 
-config BOARD_LCD_DE_IDLE_HIGH
+config BOARD_LCD_POL_DE_IDLE_HIGH
     bool "DE idle level high"
     default y
     help
         Keep enabled for panels that gate active video when DE is high. Disable
         only if your panel requires DE low during active periods.
+
+config BOARD_LCD_BOUNCE_LINES
+    int "RGB bounce buffer line count (0=disabled)"
+    default 8
+    help
+        When framebuffers live in PSRAM, enable a small internal RAM bounce
+        buffer to absorb DMA underflows. Size is hor_res * BOUNCE_LINES pixels.
+        Set to 0 to disable bounce buffering.
 
 config BOARD_LCD_PSRAM_TRANS_ALIGN
     int "PSRAM transfer alignment for RGB framebuffers"
@@ -109,6 +130,14 @@ config BOARD_LCD_STRIPES_TEST
         horizontal bands (red, green, blue) after panel initialisation and
         skips LVGL/UI start-up. Use this to validate the RGB data+polarity
         chain independently of LVGL rendering.
+
+config BOARD_LCD_TEST_PATTERN
+    bool "Display sharpness test pattern (1px checker + text) at boot"
+    default n
+    help
+        Shows a 1px checkerboard, 1px vertical lines and high-contrast text for
+        5 seconds after RGB panel init. Useful to validate PCLK/polarities and
+        detect shimmer/blur before LVGL starts.
 
 endmenu
 
