@@ -2,6 +2,5 @@ set(board_requires driver esp_lcd esp_lcd_touch esp_lcd_touch_gt911 esp_driver_i
 
 idf_component_register(SRCS "src/board.c" "src/board_backlight.c"
                       INCLUDE_DIRS "include"
-                      PRIV_INCLUDE_DIRS "../core/include"
                       REQUIRES ${board_requires}
                       PRIV_REQUIRES esp_driver_ledc)

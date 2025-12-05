@@ -22,9 +22,9 @@ typedef struct {
 
 void rgb_vsync_sync_init(rgb_vsync_sync_t *sync, TaskHandle_t notify_task);
 void rgb_vsync_sync_set_task(rgb_vsync_sync_t *sync, TaskHandle_t notify_task);
-bool IRAM_ATTR rgb_vsync_sync_on_vsync(esp_lcd_panel_handle_t panel,
-                                       const esp_lcd_rgb_panel_event_data_t *edata,
-                                       void *user_ctx);
+bool rgb_vsync_sync_on_vsync(esp_lcd_panel_handle_t panel,
+                             const esp_lcd_rgb_panel_event_data_t *edata,
+                             void *user_ctx);
 void rgb_vsync_sync_mark_flush(rgb_vsync_sync_t *sync, uint32_t *pending_before, uint32_t *current_vsync);
 bool rgb_vsync_sync_wait(rgb_vsync_sync_t *sync, TickType_t timeout_ticks);
 
