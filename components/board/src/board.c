@@ -166,6 +166,9 @@ static bool board_touch_fetch(uint16_t *x, uint16_t *y, uint8_t *count_out);
 static esp_err_t board_lcd_power_on_sequence(void);
 static esp_err_t board_lcd_selftest_pattern(void);
 static esp_err_t board_lcd_debug_patterns_internal(void);
+#if CONFIG_BOARD_LCD_STRIPES_TEST
+static void board_lcd_fill_stripes_rgb565(uint16_t *fb, int w, int h);
+#endif
 #if CONFIG_BOARD_LCD_BYPASS_LVGL_SELFTEST
 static esp_err_t board_lcd_bypass_lvgl_selftest_start(void);
 #endif
@@ -684,19 +687,19 @@ static esp_err_t board_lcd_power_on_sequence(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    ESP_LOGI(TAG, "LCD power-up: LCD_VDD_EN -> DISP/BK low -> RST pulse -> DISP/BK on");
-    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_BK, false), TAG_IO, "LCD DISP/BK gate low failed");
-    vTaskDelay(pdMS_TO_TICKS(5));
-
+    ESP_LOGI(TAG, "LCD power-up: VDD/VCOM on -> BK off -> RST pulse -> settle -> BK on");
     ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_VDD, true), TAG_IO, "LCD_VDD_EN high failed");
-    vTaskDelay(pdMS_TO_TICKS(20));
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_BK, false), TAG_IO, "LCD BK gate low failed");
+    vTaskDelay(pdMS_TO_TICKS(10));
 
     ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_RST, false), TAG_IO, "LCD_RST drive low failed");
-    vTaskDelay(pdMS_TO_TICKS(15));
+    vTaskDelay(pdMS_TO_TICKS(20));
     ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_LCD_RST, true), TAG_IO, "LCD_RST release failed");
-    vTaskDelay(pdMS_TO_TICKS(40));
+    vTaskDelay(pdMS_TO_TICKS(120));
 
-    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_BK, true), TAG_IO, "LCD DISP/BK enable failed");
+    ESP_RETURN_ON_ERROR(io_expander_set_output(IO_EXP_PIN_BK, true), TAG_IO, "LCD BK enable failed");
     vTaskDelay(pdMS_TO_TICKS(10));
     return ESP_OK;
 }
@@ -738,6 +741,29 @@ static esp_err_t board_lcd_selftest_pattern(void)
     return ESP_OK;
 #endif
 }
+
+#if CONFIG_BOARD_LCD_STRIPES_TEST
+static void board_lcd_fill_stripes_rgb565(uint16_t *fb, int w, int h)
+{
+    if (!fb || w <= 0 || h <= 0) {
+        return;
+    }
+
+    const uint16_t colors[3] = {0xF800, 0x07E0, 0x001F};
+    const int band_height = (h >= 3) ? (h / 3) : h;
+
+    for (int y = 0; y < h; ++y) {
+        int band = band_height ? (y / band_height) : 0;
+        if (band > 2) {
+            band = 2;
+        }
+        uint16_t *row = fb + (size_t)y * (size_t)w;
+        for (int x = 0; x < w; ++x) {
+            row[x] = colors[band];
+        }
+    }
+}
+#endif
 
 static void board_lcd_fill_color(uint16_t **fbs, size_t fb_count, size_t h_res, size_t v_res, size_t stride_px,
                                  uint16_t color)
@@ -938,6 +964,8 @@ static esp_err_t board_lcd_init(void)
     const uint32_t htotal = BOARD_LCD_H_RES + BOARD_LCD_HSYNC_BACK_PORCH + BOARD_LCD_HSYNC_FRONT_PORCH + BOARD_LCD_HSYNC_PULSE_WIDTH;
     const uint32_t vtotal = BOARD_LCD_V_RES + BOARD_LCD_VSYNC_BACK_PORCH + BOARD_LCD_VSYNC_FRONT_PORCH + BOARD_LCD_VSYNC_PULSE_WIDTH;
     const double fps = ((double)BOARD_LCD_PIXEL_CLOCK_HZ) / ((double)htotal * (double)vtotal);
+    const bool pclk_active_neg = false;
+    const bool de_idle_high = false;
 
     ESP_LOGI(TAG, "Initializing RGB LCD Panel %ux%u @ %.2f MHz (Waveshare 7B)", BOARD_LCD_H_RES, BOARD_LCD_V_RES,
              (double)BOARD_LCD_PIXEL_CLOCK_HZ / 1e6);
@@ -948,7 +976,7 @@ static esp_err_t board_lcd_init(void)
              BOARD_LCD_DISP, BOARD_LCD_PCLK, BOARD_LCD_VSYNC, BOARD_LCD_HSYNC, BOARD_LCD_DE);
     ESP_LOGI(TAG,
              "LCD polarities: pclk_active_neg=%d hsync_idle_low=%d vsync_idle_low=%d de_idle_high=%d",
-             BOARD_LCD_PCLK_ACTIVE_NEG, BOARD_LCD_HSYNC_IDLE_LOW, BOARD_LCD_VSYNC_IDLE_LOW, BOARD_LCD_DE_IDLE_HIGH);
+             pclk_active_neg, BOARD_LCD_HSYNC_IDLE_LOW, BOARD_LCD_VSYNC_IDLE_LOW, de_idle_high);
     ESP_LOGI(TAG, "LCD totals: htotal=%u vtotal=%u -> fps=%.2f", (unsigned)htotal, (unsigned)vtotal, fps);
 #if CONFIG_BOARD_LCD_SELFTEST_PATTERN
     ESP_LOGW(TAG, "LCD selftest pattern is ENABLED and will run before LVGL");
@@ -998,10 +1026,10 @@ static esp_err_t board_lcd_init(void)
             .vsync_front_porch = BOARD_LCD_VSYNC_FRONT_PORCH,
             .vsync_pulse_width = BOARD_LCD_VSYNC_PULSE_WIDTH,
             .flags = {
-                .pclk_active_neg = BOARD_LCD_PCLK_ACTIVE_NEG,
+                .pclk_active_neg = pclk_active_neg,
                 .hsync_idle_low = BOARD_LCD_HSYNC_IDLE_LOW,
                 .vsync_idle_low = BOARD_LCD_VSYNC_IDLE_LOW,
-                .de_idle_high = BOARD_LCD_DE_IDLE_HIGH,
+                .de_idle_high = de_idle_high,
             },
         },
         .data_width = LCD_DATA_GPIO_COUNT,
@@ -1059,6 +1087,15 @@ static esp_err_t board_lcd_init(void)
     const size_t stride_bytes = (size_t)BOARD_LCD_H_RES * sizeof(uint16_t);
     ESP_LOGI(TAG, "RGB frame buffers: fb0=%p fb1=%p size=%zu stride=%zu align=%u", fb0, fb1, fb_size_bytes, stride_bytes,
              (unsigned)BOARD_LCD_PSRAM_TRANS_ALIGN);
+
+#if CONFIG_BOARD_LCD_STRIPES_TEST
+    ESP_LOGW(TAG, "CONFIG_BOARD_LCD_STRIPES_TEST enabled: filling RGB565 stripes and skipping LVGL bring-up");
+    board_lcd_fill_stripes_rgb565((uint16_t *)fb0, BOARD_LCD_H_RES, BOARD_LCD_V_RES);
+    board_lcd_fill_stripes_rgb565((uint16_t *)fb1, BOARD_LCD_H_RES, BOARD_LCD_V_RES);
+    (void)esp_lcd_panel_disp_on(s_lcd_panel_handle, true);
+    s_board_has_lcd = true;
+    return ESP_OK;
+#endif
 
 #if CONFIG_BOARD_LCD_DEBUG_PATTERN_AT_BOOT
     ESP_LOGW(TAG, "LCD debug framebuffer patterns enabled before LVGL bring-up");

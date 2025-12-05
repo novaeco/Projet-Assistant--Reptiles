@@ -1,0 +1,12 @@
+menu "UI"
+
+config UI_FORCE_HIGH_CONTRAST
+    bool "Force high-contrast fallback screen (white background, BONJOUR)"
+    default n
+    help
+        When enabled, LVGL displays a high-contrast fallback screen (white
+        background with a centered black "BONJOUR" label) instead of the
+        standard UI. Use this to rule out dark-on-dark rendering during
+        display bring-up.
+
+endmenu
