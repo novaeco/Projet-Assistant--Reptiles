@@ -1,7 +1,7 @@
 #include "sdspi_ioext_host.h"
 #include "driver/sdspi_host.h"
 #include "driver/spi_common.h"
-#include "esp_check.h"
+#include "esp_check_compat.h"
 #include "esp_log.h"
 #include "esp_rom_sys.h"
 #include "freertos/semphr.h"

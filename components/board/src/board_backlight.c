@@ -3,7 +3,7 @@
 #include "board_io_map.h"
 #include "board_pins.h"
 #include "driver/ledc.h"
-#include "esp_check.h"
+#include "esp_check_compat.h"
 #include "esp_log.h"
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
