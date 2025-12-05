@@ -66,13 +66,18 @@ static void search_event_cb(lv_event_t * e)
 
 void ui_create_web_screen(void)
 {
+    lv_display_t *disp = lv_display_get_default();
+    lv_coord_t disp_w = lv_display_get_horizontal_resolution(disp);
+    lv_coord_t disp_h = lv_display_get_vertical_resolution(disp);
+    const lv_coord_t header_height = 60;
+
     // 1. Screen
     lv_obj_t * scr = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(scr, lv_color_hex(0xF0F0F0), 0);
 
     // 2. Header
     lv_obj_t * header = lv_obj_create(scr);
-    lv_obj_set_size(header, LV_PCT(100), 60);
+    lv_obj_set_size(header, LV_PCT(100), header_height);
     lv_obj_set_pos(header, 0, 0);
     lv_obj_set_style_bg_color(header, lv_palette_darken(LV_PALETTE_GREY, 3), 0);
 
@@ -89,8 +94,8 @@ void ui_create_web_screen(void)
 
     // 3. Content
     lv_obj_t * cont = lv_obj_create(scr);
-    lv_obj_set_size(cont, LV_PCT(100), lv_pct(100) - 60);
-    lv_obj_set_y(cont, 60);
+    lv_obj_set_size(cont, disp_w, disp_h - header_height);
+    lv_obj_set_y(cont, header_height);
     lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(cont, 20, 0);
     lv_obj_set_style_pad_gap(cont, 15, 0);

@@ -108,12 +108,19 @@ static void add_animal_event_cb(lv_event_t * e) {
 
 void ui_create_animal_list_screen(void)
 {
+    lv_display_t *disp = lv_display_get_default();
+    lv_coord_t disp_w = lv_display_get_horizontal_resolution(disp);
+    lv_coord_t disp_h = lv_display_get_vertical_resolution(disp);
+    const lv_coord_t header_height = 60;
+    const lv_coord_t search_bar_height = 40;
+    const lv_coord_t vertical_margin = 20; // approximate spacing between search bar and list
+
     lv_obj_t * scr = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(scr, lv_color_hex(0xF0F0F0), 0);
 
     // Header
     lv_obj_t * header = lv_obj_create(scr);
-    lv_obj_set_size(header, LV_PCT(100), 60);
+    lv_obj_set_size(header, LV_PCT(100), header_height);
     lv_obj_set_pos(header, 0, 0);
     lv_obj_set_style_bg_color(header, lv_palette_darken(LV_PALETTE_GREY, 3), 0);
 
@@ -136,8 +143,8 @@ void ui_create_animal_list_screen(void)
     ta_search = lv_textarea_create(scr);
     lv_textarea_set_one_line(ta_search, true);
     lv_textarea_set_placeholder_text(ta_search, "Rechercher...");
-    lv_obj_set_size(ta_search, LV_PCT(90), 40);
-    lv_obj_align(ta_search, LV_ALIGN_TOP_MID, 0, 70);
+    lv_obj_set_size(ta_search, LV_PCT(90), search_bar_height);
+    lv_obj_align(ta_search, LV_ALIGN_TOP_MID, 0, header_height + 10);
     lv_obj_add_event_cb(ta_search, search_event_cb, LV_EVENT_ALL, NULL);
 
     // Keyboard (Hidden initially)
@@ -151,8 +158,9 @@ void ui_create_animal_list_screen(void)
 
     // List
     list_animals = lv_list_create(scr);
-    lv_obj_set_size(list_animals, LV_PCT(100), lv_pct(100) - 120);
-    lv_obj_set_y(list_animals, 120);
+    lv_coord_t list_h = disp_h - header_height - search_bar_height - vertical_margin;
+    lv_obj_set_size(list_animals, disp_w, list_h);
+    lv_obj_set_y(list_animals, header_height + search_bar_height + vertical_margin);
 
     load_animal_list_correct(NULL);
 
